@@ -165,29 +165,34 @@ def openrouter_models():
     out.sort(key=lambda x: (not x["free"], x["id"]))
     return jsonify({"count": len(out), "free_count": sum(1 for x in out if x["free"]), "models": out})
 
-@app.route("/api/test_model", methods=["POST"])
-def test_model():
+@app.route("/api/test_models", methods=["POST"])
+def test_models():
     body = request.get_json(force=True)
-    model = body.get("model", "").strip()
-    word = body.get("word", "fire")
-    if not model: return jsonify({"error": "no model"}), 400
+    models = [m.strip() for m in body.get("models", []) if m.strip()]
+    words = [w.strip() for w in body.get("words", []) if w.strip()] or ["fire"]
+    prompt_tpl = body.get("prompt") or None
+    guess_model = body.get("guess_model", "").strip() or None
+    if not models: return jsonify({"error": "no models"}), 400
     import pipeline as pl
+    if prompt_tpl is None: prompt_tpl = pl.DEFAULT_PROMPTS["en"]["bootstrap_prompts"][0]
     svc = pl.openrouter_raw(os.environ["OPENROUTER_API_KEY"], 0.6, max_retries=1)
-    out = {"model": model, "word": word}
-    t = time.monotonic()
-    try:
-        prompt = pl.DEFAULT_PROMPTS["en"]["bootstrap_prompts"][0].format(word=word)
-        text = svc(prompt, model).strip()
-        out["explication"] = text
-        out["explication_ms"] = int((time.monotonic() - t) * 1000)
-        t2 = time.monotonic()
-        guess = svc(pl.DEFAULT_PROMPTS["en"]["guess_prompt"].format(text=text), model).strip()
-        out["guess"] = guess
-        out["guess_ms"] = int((time.monotonic() - t2) * 1000)
-        out["roundtrip_ok"] = word.lower() in guess.lower()
-    except Exception as e:
-        out["error"] = str(e)
-    return jsonify(out)
+    results = []
+    for model in models[:8]:
+        for word in words[:5]:
+            r = {"model": model, "word": word}
+            t = time.monotonic()
+            try:
+                text = svc(prompt_tpl.format(word=word), model).strip()
+                r["explication"] = text
+                r["ms"] = int((time.monotonic() - t) * 1000)
+                gm = guess_model or model
+                guess = svc(pl.DEFAULT_PROMPTS["en"]["guess_prompt"].format(text=text), gm).strip()
+                r["guess"] = guess; r["guess_model"] = gm
+                r["ok"] = word.lower() in guess.lower()
+            except Exception as e:
+                r["error"] = str(e)
+            results.append(r)
+    return jsonify({"prompt": prompt_tpl, "results": results})
 
 @app.route("/api/wordlists")
 def wordlists():
@@ -224,6 +229,16 @@ def create_experiment():
     save_json(exp_path(eid, "config.json"), cfg)
     save_json(exp_path(eid, "state.json"), pipeline.empty_state())
     return jsonify({"id": eid})
+
+@app.route("/api/experiments/<eid>/delete", methods=["POST"])
+def delete_experiment(eid):
+    r = runners.get(eid)
+    if r and r.thread and r.thread.is_alive(): return jsonify({"error": "still running, stop it first"}), 400
+    p = os.path.join(EXP_DIR, eid)
+    if not os.path.isdir(p): return jsonify({"error": "not found"}), 404
+    shutil.rmtree(p)
+    runners.pop(eid, None)
+    return jsonify({"deleted": eid})
 
 @app.route("/api/experiments/<eid>/start", methods=["POST"])
 def start(eid):

@@ -472,11 +472,14 @@ function showModels(){
       + "</tbody></table></div>";
   };
   if (modelsCache){ render(); return; }
-  api("/api/openrouter_models").then(function(r){ return r.json(); }).then(function(d){
+  api("/api/openrouter_models").then(function(r){
+    if (!r.ok) throw new Error("http " + r.status + " (server missing endpoint? redeploy latest)");
+    return r.json();
+  }).then(function(d){
     if (d.error){ el.textContent = "failed: " + d.error; return; }
     modelsCache = d; render();
     document.getElementById("modelfilter").addEventListener("input", render);
-  });
+  }).catch(function(e){ el.innerHTML = "<pre class='bt'>catalog load failed: " + esc(String(e)) + "</pre>"; });
 }
 
 function refreshLog(){
