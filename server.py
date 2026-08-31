@@ -147,6 +147,22 @@ def diag():
     except Exception as e: d["openrouter_reachable"] = str(e)
     return jsonify(d)
 
+@app.route("/api/provider_models/<prov>")
+def provider_models(prov):
+    import pipeline as pl, requests as _rq
+    if prov not in pl.PROVIDERS: return jsonify({"error": f"unknown provider (known: {list(pl.PROVIDERS)})"}), 400
+    p = pl.PROVIDERS[prov]
+    key = os.environ.get(p["key_env"], "")
+    if not key: return jsonify({"error": f"{p['key_env']} not set"}), 400
+    try:
+        r = _rq.get(p["base_url"] + "/models", headers={"Authorization": f"Bearer {key}"}, timeout=15)
+        data = r.json()
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+    models = data.get("data", data.get("models", []))
+    ids = sorted(m.get("id", m.get("name", "?")) for m in models if isinstance(m, dict))
+    return jsonify({"provider": prov, "count": len(ids), "ids": ids})
+
 @app.route("/api/openrouter_models")
 def openrouter_models():
     import requests as _rq
