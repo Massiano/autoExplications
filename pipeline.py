@@ -114,14 +114,14 @@ def openrouter_raw(api_key, temperature, max_retries=6):
             resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
                 wait = float(resp.headers.get("Retry-After", backoff))
-                time.sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
+                interruptible_sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
             if resp.status_code >= 400:
                 raise RuntimeError(f"http {resp.status_code} for model '{model}': {resp.text[:300]}")
             data = resp.json()
             if "error" in data:
                 err = data["error"]
                 if isinstance(err, dict) and err.get("code") in (429, 500, 502, 503, 504) and attempt < max_retries:
-                    time.sleep(backoff); backoff = min(backoff * 2, 300); continue
+                    interruptible_sleep(backoff); backoff = min(backoff * 2, 300); continue
                 raise RuntimeError(f"openrouter error: {err}")
             content = data["choices"][0]["message"]["content"]
             if not content or not content.strip():
@@ -136,10 +136,20 @@ def empty_state():
 
 class StopRequested(Exception): pass
 
+_ACTIVE_STOP_FN = {"fn": None}
+
+def interruptible_sleep(seconds):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        fn = _ACTIVE_STOP_FN["fn"]
+        if fn and fn(): raise StopRequested()
+        time.sleep(min(1.0, end - time.monotonic()) if end > time.monotonic() else 0)
+
 class Pipeline:
     def __init__(self, config, state, save_fn, log_fn, stop_fn):
         self.cfg = config; self.state = {**empty_state(), **state}
         self.save = lambda: save_fn(self.state); self.log = log_fn; self.stop_fn = stop_fn
+        _ACTIVE_STOP_FN["fn"] = stop_fn
         self.language = config.get("language", "en")
         self.lemma_variants, self.canonical = lang_fns(self.language)
         api_key = os.environ["OPENROUTER_API_KEY"]
