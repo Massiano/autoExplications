@@ -56,9 +56,22 @@ class Runner:
             cfg = load_json(exp_path(self.eid, "config.json"), {})
             state = load_json(exp_path(self.eid, "state.json"), {})
             targets = cfg["target_words"]
-            p = pipeline.Pipeline(cfg, state, lambda s: save_json(exp_path(self.eid, "state.json"), s), self.log, lambda: self.stop_flag)
-            self.log(f"run start: {len(targets)} targets, model {p.model}")
-            p.run(targets)
+            rounds = int(cfg.get("rounds", 1))
+            for rnd in range(1, rounds + 1):
+                state = load_json(exp_path(self.eid, "state.json"), {})
+                p = pipeline.Pipeline(cfg, state, lambda s: save_json(exp_path(self.eid, "state.json"), s), self.log, lambda: self.stop_flag)
+                before_v = len(state.get("verified_explications", {}))
+                before_a = sum(len(b.get("words", [])) for b in state.get("shell", {}).get("admitted", []))
+                self.log(f"round {rnd}/{rounds} start: {len(targets)} targets, model {p.model}")
+                p.run(targets)
+                after = load_json(exp_path(self.eid, "state.json"), {})
+                after_v = len(after.get("verified_explications", {}))
+                after_a = sum(len(b.get("words", [])) for b in after.get("shell", {}).get("admitted", []))
+                self.log(f"round {rnd}: +{after_v - before_v} verified, +{after_a - before_a} admitted")
+                if after_v == before_v and after_a == before_a:
+                    self.log("no progress this round, stopping early"); break
+                if after_v >= len(targets):
+                    self.log("all targets verified"); break
             self.status = "done"
             self.log(f"run complete in {time.monotonic() - t0:.0f}s")
         except pipeline.StopRequested:

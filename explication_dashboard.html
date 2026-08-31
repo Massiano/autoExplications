@@ -40,6 +40,9 @@ pre.bt { white-space: pre-wrap; background: #faf8f2; border: 1px dashed #ccc; pa
 .l-seed .chip { background: #e6eefc; }
 .l-adm .chip { background: #e8f6e8; }
 .l-ver .chip { background: #fdf3d8; }
+.chip.g-strict { background: #d8efd8; border-color: #6a6; }
+.chip.g-almost { background: #fde8c8; border-color: #b83; }
+.chip.g-unguessed { background: #eee; border-color: #999; }
 .l-scaf .chip { background: #f6e4e4; }
 #topbar { position: sticky; top: 0; background: #f4f2ec; padding: 4px 0; border-bottom: 1px solid #ccc; }
 input[type=text] { font-family: monospace; font-size: 13px; }
@@ -67,7 +70,9 @@ k_bootstrap <input type="text" id="ne_kb" size="3" value="5">
 k_mine <input type="text" id="ne_km" size="3" value="5">
 min_share <input type="text" id="ne_ms" size="4" value="0.8">
 admit_top_n <input type="text" id="ne_admit" size="4" value="30">
+rounds <input type="text" id="ne_rounds" size="3" value="1">
 <button class="qcbtn" onclick="createExp()">create</button>
+&nbsp;|&nbsp; from config file: <input type="file" id="cfgfile" accept=".json">
 </div>
 <h2>server experiments</h2>
 <div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
@@ -191,7 +196,20 @@ function renderShell(){
     var extra = edges.length ? "<div class='small' style='margin-top:4px'>enabled (observational, not proven necessary):<br>" + edges.join("<br>") + "</div>" : "";
     layer("admitted round " + b.round + " — ostensive (picture-taught)", b.words || [], "l-adm", extra);
   });
-  layer("verified — riddle-taught, acquisition order", sh.verified_order || [], "l-ver");
+  var grades = d.grades || {};
+  var vo = (sh.verified_order || []).slice();
+  var sortSel = "<select id='versort' onchange='renderShell()'><option value='acq'>acquisition order</option><option value='grade'>by grade</option><option value='alpha'>alphabetical</option></select>";
+  var mode = (document.getElementById("versort") || {}).value || "acq";
+  if (mode === "grade"){ var go = {strict: 0, almost: 1}; vo.sort(function(a, b){ return (go[grades[a]] ?? 2) - (go[grades[b]] ?? 2) || a.localeCompare(b); }); }
+  if (mode === "alpha") vo.sort();
+  var unv = Object.keys(d.strict_but_unguessed || {}).sort();
+  var div = document.createElement("div"); div.className = "word";
+  div.innerHTML = "<div class='t'>verified — riddle-taught <span class='small'>(" + vo.length + ")</span> " + sortSel
+    + " <span class='small'><span class='chip g-strict'>strict</span> <span class='chip g-almost'>almost</span> <span class='chip g-unguessed'>in-shell, unguessed</span></span></div>"
+    + "<div class='chips l-ver'>" + vo.map(function(w){ var g = grades[w] || "strict"; return "<span class='chip g-" + g + "'>" + esc(w) + "</span>"; }).join("") + "</div>"
+    + (unv.length ? "<div class='chips' style='margin-top:4px'>" + unv.map(function(w){ return "<span class='chip g-unguessed'>" + esc(w) + "</span>"; }).join("") + "</div>" : "");
+  el.appendChild(div);
+  var sel = div.querySelector("#versort"); if (sel) sel.value = mode;
   layer("scaffold — UNTAUGHT debt (co-occurrence only)", sh.scaffold || [], "l-scaf");
 }
 
@@ -276,6 +294,21 @@ function connectServer(){
   }).catch(function(e){ document.getElementById("serverstatus").textContent = "connect failed: " + e; });
 }
 
+document.addEventListener("change", function(ev){
+  if (ev.target.id !== "cfgfile") return;
+  var f = ev.target.files[0]; if (!f) return;
+  var r = new FileReader();
+  r.onload = function(){
+    try { var cfg = JSON.parse(r.result); } catch(e){ alert("bad json: " + e); return; }
+    api("/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cfg)})
+      .then(function(resp){ return resp.json(); }).then(function(res){
+        if (res.error) alert(res.error); else refreshRuns();
+      });
+  };
+  r.readAsText(f);
+  ev.target.value = "";
+});
+
 function createExp(){
   var body = {wordlist: document.getElementById("ne_wordlist").value,
     n_targets: parseInt(document.getElementById("ne_n").value) || 30,
@@ -283,7 +316,8 @@ function createExp(){
     k_bootstrap: parseInt(document.getElementById("ne_kb").value) || 5,
     k_mine: parseInt(document.getElementById("ne_km").value) || 5,
     min_share: parseFloat(document.getElementById("ne_ms").value) || 0.8,
-    admit_top_n: parseInt(document.getElementById("ne_admit").value) || 0};
+    admit_top_n: parseInt(document.getElementById("ne_admit").value) || 0,
+    rounds: parseInt(document.getElementById("ne_rounds").value) || 1};
   var id = document.getElementById("ne_id").value.trim();
   if (id) body.id = id;
   api("/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
@@ -305,6 +339,27 @@ function refreshRuns(){
         b.onclick = function(){ api("/api/experiments/" + e.id + a[1], {method: "POST"}).then(refreshRuns); };
         td.appendChild(b);
       });
+      var bc = document.createElement("button"); bc.className = "qcbtn"; bc.textContent = "clone";
+      bc.onclick = function(){
+        api("/api/experiments/" + e.id + "/config").then(function(r){ return r.json(); }).then(function(cfg){
+          var nid = prompt("new experiment id:", e.id + "_v2");
+          if (!nid) return;
+          cfg.id = nid;
+          api("/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cfg)})
+            .then(function(resp){ return resp.json(); }).then(function(res){
+              if (res.error) alert(res.error); else refreshRuns();
+            });
+        });
+      };
+      td.appendChild(bc);
+      var bcd = document.createElement("button"); bcd.className = "qcbtn"; bcd.textContent = "config";
+      bcd.onclick = function(){
+        api("/api/experiments/" + e.id + "/config").then(function(r){ return r.json(); }).then(function(cfg){
+          var blob = new Blob([JSON.stringify(cfg, null, 2)], {type: "application/json"});
+          var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = e.id + "_config.json"; a.click();
+        });
+      };
+      td.appendChild(bcd);
       var bd = document.createElement("button"); bd.className = "qcbtn"; bd.textContent = "download";
       bd.onclick = function(){
         api("/api/experiments/" + e.id + "/state").then(function(r){ return r.json(); }).then(function(st){
@@ -314,7 +369,10 @@ function refreshRuns(){
       };
       td.appendChild(bd);
       var bl = document.createElement("button"); bl.className = "qcbtn"; bl.textContent = "log";
-      bl.onclick = function(){ logEid = e.id; refreshLog(); };
+      bl.onclick = function(){
+        if (logEid === e.id){ logEid = null; document.getElementById("runlog").textContent = ""; }
+        else { logEid = e.id; refreshLog(); }
+      };
       td.appendChild(bl);
       var bv = document.createElement("button"); bv.className = "qcbtn"; bv.textContent = "load state";
       bv.onclick = function(){
