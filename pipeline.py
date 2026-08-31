@@ -94,7 +94,7 @@ def openrouter_raw(api_key, temperature, max_retries=6):
         backoff = 5.0
         for attempt in range(max_retries + 1):
             resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json={"model": model, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
-            if resp.status_code == 429 and attempt < max_retries:
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
                 wait = float(resp.headers.get("Retry-After", backoff))
                 time.sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
             if resp.status_code >= 400:
@@ -102,7 +102,7 @@ def openrouter_raw(api_key, temperature, max_retries=6):
             data = resp.json()
             if "error" in data:
                 err = data["error"]
-                if isinstance(err, dict) and err.get("code") == 429 and attempt < max_retries:
+                if isinstance(err, dict) and err.get("code") in (429, 500, 502, 503, 504) and attempt < max_retries:
                     time.sleep(backoff); backoff = min(backoff * 2, 300); continue
                 raise RuntimeError(f"openrouter error: {err}")
             content = data["choices"][0]["message"]["content"]

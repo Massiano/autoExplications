@@ -63,7 +63,7 @@ class Runner:
                 p = pipeline.Pipeline(cfg, state, lambda s: save_json(exp_path(self.eid, "state.json"), s), self.log, lambda: self.stop_flag)
                 before_v = len(state.get("verified_explications", {}))
                 before_a = sum(len(b.get("words", [])) for b in state.get("shell", {}).get("admitted", []))
-                self.log(f"round {rnd}/{rounds} start: {len(targets)} targets, model {p.model}")
+                self.log(f"round {rnd}/{rounds} start: {len(targets)} targets, models {p.role_models}")
                 p.run(targets)
                 after = load_json(exp_path(self.eid, "state.json"), {})
                 after_v = len(after.get("verified_explications", {}))
