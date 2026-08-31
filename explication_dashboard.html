@@ -73,10 +73,12 @@ admit_top_n <input type="text" id="ne_admit" size="4" value="30">
 rounds <input type="text" id="ne_rounds" size="3" value="1">
 <button class="qcbtn" onclick="createExp()">create</button>
 &nbsp;|&nbsp; from config file: <input type="file" id="cfgfile" accept=".json">
+&nbsp;|&nbsp; <button class="qcbtn" onclick="showModels()">openrouter models</button> <input type="text" id="modelfilter" size="12" placeholder="filter">
 </div>
 <h2>server experiments</h2>
 <div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
 <pre id="runlog" class="bt" style="max-height:200px;overflow:auto"></pre>
+<div id="modellist"></div>
 </div>
 </div>
 
@@ -389,6 +391,26 @@ function refreshRuns(){
     });
     if (logEid) refreshLog();
   }).catch(function(){});
+}
+
+var modelsCache = null;
+function showModels(){
+  var el = document.getElementById("modellist");
+  if (el.innerHTML){ el.innerHTML = ""; return; }
+  var render = function(){
+    var f = document.getElementById("modelfilter").value.toLowerCase();
+    var rows = modelsCache.models.filter(function(m){ return !f || m.id.toLowerCase().indexOf(f) >= 0; }).slice(0, 200);
+    el.innerHTML = "<div class='small'>" + modelsCache.free_count + " free / " + modelsCache.count + " total (click id to copy)</div>"
+      + "<div class='tw'><table><thead><tr><th>id</th><th>free</th><th>$/M in</th><th>$/M out</th><th>ctx</th></tr></thead><tbody>"
+      + rows.map(function(m){ return "<tr><td style='cursor:pointer' onclick='navigator.clipboard.writeText(\"" + m.id + "\")'>" + esc(m.id) + "</td><td>" + (m.free ? "FREE" : "") + "</td><td>" + m.prompt_per_m + "</td><td>" + m.completion_per_m + "</td><td>" + (m.context || "") + "</td></tr>"; }).join("")
+      + "</tbody></table></div>";
+  };
+  if (modelsCache){ render(); return; }
+  api("/api/openrouter_models").then(function(r){ return r.json(); }).then(function(d){
+    if (d.error){ el.textContent = "failed: " + d.error; return; }
+    modelsCache = d; render();
+    document.getElementById("modelfilter").addEventListener("input", render);
+  });
 }
 
 function refreshLog(){
