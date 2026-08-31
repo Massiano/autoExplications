@@ -327,6 +327,18 @@ document.addEventListener("change", function(ev){
   ev.target.value = "";
 });
 
+function togglePaste(){
+  var b = document.getElementById("pastebox");
+  b.style.display = b.style.display === "none" ? "block" : "none";
+}
+function createFromPaste(){
+  var cfg;
+  try { cfg = JSON.parse(document.getElementById("cfgpaste").value); } catch(e){ alert("bad json: " + e); return; }
+  api("/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(cfg)})
+    .then(function(r){ return r.json(); }).then(function(res){
+      if (res.error) alert(res.error); else { document.getElementById("pastebox").style.display = "none"; refreshRuns(); }
+    });
+}
 function createExp(){
   var body = {wordlist: document.getElementById("ne_wordlist").value,
     n_targets: parseInt(document.getElementById("ne_n").value) || 30,
@@ -433,20 +445,27 @@ function runModelTest(){
   out.innerHTML = "";
   api("/api/test_models", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
     .then(function(r){ return r.json(); }).then(function(d){
-      st.textContent = "";
-      if (d.error){ out.innerHTML = "<pre class='bt'>" + esc(d.error) + "</pre>"; return; }
-      var byModel = {};
-      d.results.forEach(function(r){ (byModel[r.model] = byModel[r.model] || []).push(r); });
-      out.innerHTML = Object.keys(byModel).map(function(m){
-        var rs = byModel[m];
-        var oks = rs.filter(function(r){ return r.ok; }).length;
-        return "<div class='word'><div class='t'>" + esc(m) + " <span class='small'>" + oks + "/" + rs.length + " roundtrip</span></div>"
-          + rs.map(function(r){
-              if (r.error) return "<div class='grade-none'>" + esc(r.word) + ": " + esc(r.error) + "</div>";
-              return "<div><b>" + esc(r.word) + "</b> (" + r.ms + "ms) guess: " + esc(r.guess) + " " + (r.ok ? "<span class='grade-strict'>OK</span>" : "<span class='grade-none'>MISS</span>")
-                + "<pre class='bt'>" + esc(r.explication) + "</pre></div>";
-            }).join("") + "</div>";
-      }).join("");
+      if (d.error){ st.textContent = ""; out.innerHTML = "<pre class='bt'>" + esc(d.error) + "</pre>"; return; }
+      var poll = setInterval(function(){
+        api("/api/test_models/" + d.job).then(function(r){ return r.json(); }).then(function(j){
+          st.textContent = j.completed + "/" + j.total + (j.done ? " done" : " ...");
+          var logHtml = "<pre class='bt'>" + j.log.map(esc).join("\n") + "</pre>";
+          if (!j.done){ out.innerHTML = logHtml; return; }
+          clearInterval(poll);
+          var byModel = {};
+          j.results.forEach(function(r){ (byModel[r.model] = byModel[r.model] || []).push(r); });
+          out.innerHTML = Object.keys(byModel).map(function(m){
+            var rs = byModel[m];
+            var oks = rs.filter(function(r){ return r.ok; }).length;
+            return "<div class='word'><div class='t'>" + esc(m) + " <span class='small'>" + oks + "/" + rs.length + " roundtrip</span></div>"
+              + rs.map(function(r){
+                  if (r.error) return "<div class='grade-none'>" + esc(r.word) + ": " + esc(r.error) + "</div>";
+                  return "<div><b>" + esc(r.word) + "</b> (" + r.ms + "ms) guess: " + esc(r.guess) + " " + (r.ok ? "<span class='grade-strict'>OK</span>" : "<span class='grade-none'>MISS</span>")
+                    + "<pre class='bt'>" + esc(r.explication) + "</pre></div>";
+                }).join("") + "</div>";
+          }).join("") + logHtml;
+        }).catch(function(){});
+      }, 2000);
     }).catch(function(e){ st.textContent = ""; out.innerHTML = "<pre class='bt'>request failed: " + esc(String(e)) + "</pre>"; });
 }
 document.addEventListener("click", function(ev){
