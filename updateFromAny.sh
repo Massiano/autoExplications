@@ -8,5 +8,9 @@ echo "using: $newest"
 unzip -o "$newest"
 rm -f *.zip
 git add -A
-git commit -m "${1:-update ($newest)}"
-git push
+if git diff --cached --quiet; then
+  echo "no changes - repo already matches this zip"
+else
+  git commit -m "${1:-update ($newest)}"
+  git push
+fi
