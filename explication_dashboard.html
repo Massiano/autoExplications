@@ -455,7 +455,19 @@ function exportQC(){
 }
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
-if (location.protocol.indexOf("http") === 0){ document.getElementById("serverurl").value = ""; connectServer(); }
+if (location.protocol.indexOf("http") === 0){
+  document.getElementById("serverurl").value = "";
+  connectServer();
+  api("/api/experiments").then(function(r){ return r.json(); }).then(function(list){
+    if (!list.length) return;
+    var latest = list[list.length - 1];
+    api("/api/experiments/" + latest.id + "/state").then(function(r){ return r.json(); }).then(function(st){
+      experiments.push({name: latest.id + " (server)", data: st});
+      activeIdx = experiments.length - 1;
+      renderAll();
+    });
+  }).catch(function(){});
+}
 </script>
 </body>
 </html>
