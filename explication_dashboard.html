@@ -409,6 +409,14 @@ function refreshRuns(){
         });
       };
       td.appendChild(bv);
+      var bx = document.createElement("button"); bx.className = "qcbtn"; bx.textContent = "delete";
+      bx.onclick = function(){
+        if (!confirm("delete experiment '" + e.id + "' and all its data on the server? (download state first if you want it)")) return;
+        api("/api/experiments/" + e.id + "/delete", {method: "POST"}).then(function(r){ return r.json(); }).then(function(res){
+          if (res.error) alert(res.error); else refreshRuns();
+        });
+      };
+      td.appendChild(bx);
       tr.appendChild(td);
       tb.appendChild(tr);
     });
