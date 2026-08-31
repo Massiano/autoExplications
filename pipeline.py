@@ -89,15 +89,27 @@ def make_cached(svc):
         return result
     return cached
 
-def openrouter_raw(api_key, temperature):
+def openrouter_raw(api_key, temperature, max_retries=6):
     def call(prompt, model):
-        resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json={"model": model, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
-        resp.raise_for_status()
-        data = resp.json()
-        if "error" in data: raise RuntimeError(f"openrouter error: {data['error']}")
-        content = data["choices"][0]["message"]["content"]
-        if not content or not content.strip(): raise RuntimeError("empty completion")
-        return content
+        backoff = 5.0
+        for attempt in range(max_retries + 1):
+            resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json={"model": model, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
+            if resp.status_code == 429 and attempt < max_retries:
+                wait = float(resp.headers.get("Retry-After", backoff))
+                time.sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
+            resp.raise_for_status()
+            data = resp.json()
+            if "error" in data:
+                err = data["error"]
+                if isinstance(err, dict) and err.get("code") == 429 and attempt < max_retries:
+                    time.sleep(backoff); backoff = min(backoff * 2, 300); continue
+                raise RuntimeError(f"openrouter error: {err}")
+            content = data["choices"][0]["message"]["content"]
+            if not content or not content.strip():
+                if attempt < max_retries: time.sleep(2); continue
+                raise RuntimeError("empty completion")
+            return content
+        raise RuntimeError("retries exhausted")
     return call
 
 def empty_state():

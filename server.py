@@ -146,6 +146,25 @@ def diag():
     except Exception as e: d["openrouter_reachable"] = str(e)
     return jsonify(d)
 
+@app.route("/api/openrouter_models")
+def openrouter_models():
+    import requests as _rq
+    try:
+        r = _rq.get("https://openrouter.ai/api/v1/models", timeout=15)
+        models = r.json().get("data", [])
+    except Exception as e:
+        return jsonify({"error": str(e)}), 502
+    out = []
+    for m in models:
+        p = m.get("pricing", {})
+        try: free = float(p.get("prompt", 1)) == 0 and float(p.get("completion", 1)) == 0
+        except Exception: free = False
+        out.append({"id": m.get("id"), "free": free, "context": m.get("context_length"),
+                    "prompt_per_m": round(float(p.get("prompt", 0)) * 1e6, 3) if p.get("prompt") else 0,
+                    "completion_per_m": round(float(p.get("completion", 0)) * 1e6, 3) if p.get("completion") else 0})
+    out.sort(key=lambda x: (not x["free"], x["id"]))
+    return jsonify({"count": len(out), "free_count": sum(1 for x in out if x["free"]), "models": out})
+
 @app.route("/api/wordlists")
 def wordlists():
     out = {}

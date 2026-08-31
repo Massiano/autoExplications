@@ -333,8 +333,15 @@ function refreshRuns(){
     var tb = document.querySelector("#runtable tbody"); tb.innerHTML = "";
     list.forEach(function(e){
       var tr = document.createElement("tr");
-      tr.innerHTML = "<td>" + esc(e.id) + "</td><td>" + esc(e.status) + (e.error ? " <span class='grade-none'>" + esc(e.error) + "</span>" : "") + "</td><td>"
+      tr.innerHTML = "<td style='cursor:pointer' title='click: show config'>" + esc(e.id) + "</td><td>" + esc(e.status) + (e.error ? " <span class='grade-none'>" + esc(e.error) + "</span>" : "") + "</td><td>"
         + e.n_targets + "</td><td>" + e.bootstrapped + "</td><td>" + e.verified + "</td><td class='small'>" + esc(e.model) + "</td>";
+      tr.cells[0].onclick = function(){
+        if (logEid === "cfg:" + e.id){ logEid = null; document.getElementById("runlog").textContent = ""; return; }
+        api("/api/experiments/" + e.id + "/config").then(function(r){ return r.json(); }).then(function(cfg){
+          logEid = "cfg:" + e.id;
+          document.getElementById("runlog").textContent = "[config " + e.id + " — immutable; use clone to vary]\n" + JSON.stringify(cfg, null, 2);
+        });
+      };
       var td = document.createElement("td");
       [["start", "/start"], ["stop", "/stop"]].forEach(function(a){
         var b = document.createElement("button"); b.className = "qcbtn"; b.textContent = a[0];
@@ -414,6 +421,7 @@ function showModels(){
 }
 
 function refreshLog(){
+  if (!logEid || logEid.indexOf("cfg:") === 0) return;
   api("/api/experiments/" + logEid + "/log?n=60").then(function(r){ return r.text(); }).then(function(t){
     var el = document.getElementById("runlog"); el.textContent = "[" + logEid + "]\n" + t; el.scrollTop = el.scrollHeight;
   });
@@ -460,7 +468,8 @@ if (location.protocol.indexOf("http") === 0){
   connectServer();
   api("/api/experiments").then(function(r){ return r.json(); }).then(function(list){
     if (!list.length) return;
-    var latest = list[list.length - 1];
+    var withResults = list.filter(function(e){ return e.verified > 0 || e.bootstrapped > 0; });
+    var latest = withResults.length ? withResults[withResults.length - 1] : list[list.length - 1];
     api("/api/experiments/" + latest.id + "/state").then(function(r){ return r.json(); }).then(function(st){
       experiments.push({name: latest.id + " (server)", data: st});
       activeIdx = experiments.length - 1;
