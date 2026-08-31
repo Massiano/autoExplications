@@ -104,7 +104,7 @@ def resolve_provider(model):
         return PROVIDERS[prov], slug
     return PROVIDERS["openrouter"], model
 
-def openrouter_raw(api_key, temperature, max_retries=6):
+def openrouter_raw(api_key, temperature, max_retries=3):
     def call(prompt, model):
         provider, slug = resolve_provider(model)
         key = os.environ.get(provider["key_env"], "") or api_key
@@ -175,6 +175,7 @@ class Pipeline:
         def as_list(v): return v if isinstance(v, list) else [v]
         self.role_models = {role: as_list(mcfg.get(role, default_model)) for role in ("sample", "guess", "judge")}
         self._role_idx = {role: 0 for role in self.role_models}
+        self.bench = {}
         self.model = default_model
         self.prompts = {**DEFAULT_PROMPTS[self.language], **config.get("prompts", {})}
 
@@ -183,6 +184,29 @@ class Pipeline:
         m = ms[self._role_idx[role] % len(ms)]
         self._role_idx[role] += 1
         return m
+
+    def call_role(self, role, prompt):
+        client = self.llm_sample if role == "sample" else self.llm_guess
+        bench_minutes = self.cfg.get("bench_minutes", 30)
+        while True:
+            now = time.monotonic()
+            available = [m for m in self.role_models[role] if self.bench.get(m, 0) <= now]
+            if not available:
+                wait = min(self.bench[m] for m in self.role_models[role]) - now
+                self.log(f"[bench] all {role} models quota-benched, sleeping {wait / 60:.0f}m")
+                interruptible_sleep(max(wait, 10))
+                continue
+            m = available[self._role_idx[role] % len(available)]
+            self._role_idx[role] += 1
+            try:
+                return client(prompt, m)
+            except RuntimeError as e:
+                msg = str(e)
+                if "429" in msg or "retries exhausted" in msg:
+                    self.bench[m] = time.monotonic() + bench_minutes * 60
+                    self.log(f"[bench] {m} quota-exhausted, benched {bench_minutes}m ({len(available) - 1} {role} models left)")
+                    continue
+                raise
 
     def _elapsed(self):
         m, s = divmod(int(time.monotonic() - getattr(self, "_t0", time.monotonic())), 60)
@@ -212,7 +236,7 @@ class Pipeline:
         for word in target_words:
             self.check_stop()
             if word in texts and texts[word]: continue
-            texts[word] = [self.llm_sample(prompts[i % len(prompts)].format(word=word), self.next_model("sample")).strip() for i in range(k)]
+            texts[word] = [self.call_role("sample", prompts[i % len(prompts)].format(word=word)).strip() for i in range(k)]
             self.log(f"[bootstrap] {word} done ({self._elapsed()})")
             self.save()
 
@@ -245,11 +269,11 @@ class Pipeline:
 
     def guess(self, text):
         prompt = self.prompts["guess_prompt"].format(text=text)
-        return self.llm_guess(prompt, self.next_model("guess")).strip().lower().strip(string.punctuation)
+        return self.call_role("guess", prompt).strip().lower().strip(string.punctuation)
 
     def judge(self, target, guessed):
         prompt = self.prompts["judge_prompt"].format(target=target, guessed=guessed)
-        v = self.llm_guess(prompt, self.next_model("judge")).strip().lower().strip(string.punctuation)
+        v = self.call_role("judge", prompt).strip().lower().strip(string.punctuation)
         return v if v in ("strict", "almost", "no") else "no"
 
     def grade(self, target, guessed):
@@ -266,7 +290,7 @@ class Pipeline:
             self.check_stop()
             source = sources[i % len(sources)] if sources else ""
             prompt = self.prompts["mine_prompt"].format(word=word, source=source, vocab_list=vocab_list)
-            text = self.llm_sample(prompt, self.next_model("sample")).strip()
+            text = self.call_role("sample", prompt).strip()
             if self.uses_target(text, word): continue
             outside = self.find_outside(text, vocab)
             if outside:
