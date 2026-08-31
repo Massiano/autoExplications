@@ -73,14 +73,29 @@ admit_top_n <input type="text" id="ne_admit" size="4" value="30">
 rounds <input type="text" id="ne_rounds" size="3" value="1">
 <button class="qcbtn" onclick="createExp()">create</button>
 &nbsp;|&nbsp; from config file: <input type="file" id="cfgfile" accept=".json">
-&nbsp;|&nbsp; <button class="qcbtn" onclick="showModels()">openrouter models</button> <input type="text" id="modelfilter" size="12" placeholder="filter">
-&nbsp;|&nbsp; test model: <input type="text" id="testmodel" size="26" placeholder="model id"> word <input type="text" id="testword" size="7" value="fire"> <button class="qcbtn" onclick="testModel()">run test</button>
+
 </div>
 <h2>server experiments</h2>
 <div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
 <pre id="runlog" class="bt" style="max-height:200px;overflow:auto"></pre>
 <div id="modellist"></div>
 </div>
+</div>
+
+<div class="pane" id="pane-modeltest">
+<h2>model test</h2>
+<div><button class="qcbtn" onclick="showModels()">load openrouter catalog</button> <input type="text" id="modelfilter" size="14" placeholder="filter catalog"> <span class="small">click a row to add/remove from the test set</span></div>
+<div id="modellist"></div>
+<h2>test set</h2>
+<div>models (one per line):<br><textarea id="tm_models" style="width:100%;height:70px;font-family:monospace;font-size:12px">z-ai/glm-5.2:free
+nvidia/nemotron-3-super-120b-a12b:free
+google/gemma-4-31b-it:free
+minimax/minimax-m3:free</textarea></div>
+<div>words: <input type="text" id="tm_words" size="30" value="fire, water, promise"></div>
+<div>guess model (empty = self-guess): <input type="text" id="tm_guessmodel" size="26" value=""></div>
+<div>prompt (visible & editable; {word} is substituted):<br><textarea id="tm_prompt" style="width:100%;height:56px;font-family:monospace;font-size:12px">Explain the word '{word}' to a school kid, in simple everyday language. Use only very simple, common words. Do not use the word itself. Output only the explanation.</textarea></div>
+<div><button class="qcbtn" onclick="runModelTest()">run matrix</button> <span id="tm_status" class="small"></span></div>
+<div id="tm_results"></div>
 </div>
 
 <div class="pane" id="pane-experiments">
@@ -122,7 +137,7 @@ var experiments = [];
 var activeIdx = -1;
 var qc = {};
 
-var TABS = [["runner","runner"],["experiments","experiments"],["words","words"],["shell","shell"],["frontier","frontier"],["qc","QC"]];
+var TABS = [["runner","runner"],["modeltest","model test"],["experiments","experiments"],["words","words"],["shell","shell"],["frontier","frontier"],["qc","QC"]];
 var tabsEl = document.getElementById("tabs");
 TABS.forEach(function(t){
   var b = document.createElement("button");
@@ -401,21 +416,40 @@ function refreshRuns(){
   }).catch(function(){});
 }
 
-function testModel(){
-  var model = document.getElementById("testmodel").value.trim();
-  var word = document.getElementById("testword").value.trim() || "fire";
-  var el = document.getElementById("modellist");
-  el.innerHTML = "<pre class='bt'>testing " + esc(model) + " with '" + esc(word) + "'...</pre>";
-  api("/api/test_model", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model: model, word: word})})
+function runModelTest(){
+  var models = document.getElementById("tm_models").value.split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
+  var words = document.getElementById("tm_words").value.split(",").map(function(s){ return s.trim(); }).filter(Boolean);
+  var body = {models: models, words: words, prompt: document.getElementById("tm_prompt").value, guess_model: document.getElementById("tm_guessmodel").value.trim()};
+  var st = document.getElementById("tm_status"), out = document.getElementById("tm_results");
+  st.textContent = "running " + (models.length * words.length) + " tests, this takes a while...";
+  out.innerHTML = "";
+  api("/api/test_models", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
     .then(function(r){ return r.json(); }).then(function(d){
-      if (d.error){ el.innerHTML = "<pre class='bt'>FAILED: " + esc(d.error) + "</pre>"; return; }
-      el.innerHTML = "<pre class='bt'>explication (" + d.explication_ms + "ms):\n" + esc(d.explication)
-        + "\n\nself-guess (" + d.guess_ms + "ms): " + esc(d.guess) + "  ->  " + (d.roundtrip_ok ? "ROUNDTRIP OK" : "MISSED") + "</pre>";
-    }).catch(function(e){ el.innerHTML = "<pre class='bt'>request failed: " + esc(String(e)) + "</pre>"; });
+      st.textContent = "";
+      if (d.error){ out.innerHTML = "<pre class='bt'>" + esc(d.error) + "</pre>"; return; }
+      var byModel = {};
+      d.results.forEach(function(r){ (byModel[r.model] = byModel[r.model] || []).push(r); });
+      out.innerHTML = Object.keys(byModel).map(function(m){
+        var rs = byModel[m];
+        var oks = rs.filter(function(r){ return r.ok; }).length;
+        return "<div class='word'><div class='t'>" + esc(m) + " <span class='small'>" + oks + "/" + rs.length + " roundtrip</span></div>"
+          + rs.map(function(r){
+              if (r.error) return "<div class='grade-none'>" + esc(r.word) + ": " + esc(r.error) + "</div>";
+              return "<div><b>" + esc(r.word) + "</b> (" + r.ms + "ms) guess: " + esc(r.guess) + " " + (r.ok ? "<span class='grade-strict'>OK</span>" : "<span class='grade-none'>MISS</span>")
+                + "<pre class='bt'>" + esc(r.explication) + "</pre></div>";
+            }).join("") + "</div>";
+      }).join("");
+    }).catch(function(e){ st.textContent = ""; out.innerHTML = "<pre class='bt'>request failed: " + esc(String(e)) + "</pre>"; });
 }
 document.addEventListener("click", function(ev){
   var t = ev.target;
-  if (t.classList && t.classList.contains("mid")) document.getElementById("testmodel").value = t.getAttribute("data-mid");
+  if (!t.classList || !t.classList.contains("mid")) return;
+  var ta = document.getElementById("tm_models");
+  var mid = t.getAttribute("data-mid");
+  var lines = ta.value.split("\n").map(function(s){ return s.trim(); }).filter(Boolean);
+  var idx = lines.indexOf(mid);
+  if (idx >= 0) lines.splice(idx, 1); else lines.push(mid);
+  ta.value = lines.join("\n");
 });
 var modelsCache = null;
 function showModels(){
