@@ -113,14 +113,16 @@ def openrouter_raw(api_key, temperature, max_retries=6):
         for attempt in range(max_retries + 1):
             resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
-                wait = float(resp.headers.get("Retry-After", backoff))
-                interruptible_sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
+                wait = min(float(resp.headers.get("Retry-After", backoff)), 300)
+                _rlog(f"[quota/backoff] {model}: http {resp.status_code}, sleeping {wait:.0f}s (attempt {attempt + 1}/{max_retries})")
+                interruptible_sleep(wait); backoff = min(backoff * 2, 300); continue
             if resp.status_code >= 400:
                 raise RuntimeError(f"http {resp.status_code} for model '{model}': {resp.text[:300]}")
             data = resp.json()
             if "error" in data:
                 err = data["error"]
                 if isinstance(err, dict) and err.get("code") in (429, 500, 502, 503, 504) and attempt < max_retries:
+                    _rlog(f"[quota/backoff] {model}: error {err.get('code')}, sleeping {backoff:.0f}s (attempt {attempt + 1}/{max_retries})")
                     interruptible_sleep(backoff); backoff = min(backoff * 2, 300); continue
                 raise RuntimeError(f"openrouter error: {err}")
             content = data["choices"][0]["message"]["content"]
@@ -137,6 +139,11 @@ def empty_state():
 class StopRequested(Exception): pass
 
 _ACTIVE_STOP_FN = {"fn": None}
+_ACTIVE_LOG_FN = {"fn": None}
+
+def _rlog(msg):
+    fn = _ACTIVE_LOG_FN["fn"]
+    if fn: fn(msg)
 
 def interruptible_sleep(seconds):
     end = time.monotonic() + seconds
@@ -150,6 +157,7 @@ class Pipeline:
         self.cfg = config; self.state = {**empty_state(), **state}
         self.save = lambda: save_fn(self.state); self.log = log_fn; self.stop_fn = stop_fn
         _ACTIVE_STOP_FN["fn"] = stop_fn
+        _ACTIVE_LOG_FN["fn"] = log_fn
         self.language = config.get("language", "en")
         self.lemma_variants, self.canonical = lang_fns(self.language)
         api_key = os.environ["OPENROUTER_API_KEY"]
