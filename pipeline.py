@@ -97,7 +97,8 @@ def openrouter_raw(api_key, temperature, max_retries=6):
             if resp.status_code == 429 and attempt < max_retries:
                 wait = float(resp.headers.get("Retry-After", backoff))
                 time.sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
-            resp.raise_for_status()
+            if resp.status_code >= 400:
+                raise RuntimeError(f"openrouter http {resp.status_code} for model '{model}': {resp.text[:300]}")
             data = resp.json()
             if "error" in data:
                 err = data["error"]
