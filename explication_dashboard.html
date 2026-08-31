@@ -413,6 +413,10 @@ function testModel(){
         + "\n\nself-guess (" + d.guess_ms + "ms): " + esc(d.guess) + "  ->  " + (d.roundtrip_ok ? "ROUNDTRIP OK" : "MISSED") + "</pre>";
     }).catch(function(e){ el.innerHTML = "<pre class='bt'>request failed: " + esc(String(e)) + "</pre>"; });
 }
+document.addEventListener("click", function(ev){
+  var t = ev.target;
+  if (t.classList && t.classList.contains("mid")) document.getElementById("testmodel").value = t.getAttribute("data-mid");
+});
 var modelsCache = null;
 function showModels(){
   var el = document.getElementById("modellist");
@@ -422,7 +426,7 @@ function showModels(){
     var rows = modelsCache.models.filter(function(m){ return !f || m.id.toLowerCase().indexOf(f) >= 0; }).slice(0, 200);
     el.innerHTML = "<div class='small'>" + modelsCache.free_count + " free / " + modelsCache.count + " total (click id to copy)</div>"
       + "<div class='tw'><table><thead><tr><th>id</th><th>free</th><th>$/M in</th><th>$/M out</th><th>ctx</th></tr></thead><tbody>"
-      + rows.map(function(m){ return "<tr><td style='cursor:pointer' onclick='document.getElementById("testmodel").value=(\"" + m.id + "\")'>" + esc(m.id) + "</td><td>" + (m.free ? "FREE" : "") + "</td><td>" + m.prompt_per_m + "</td><td>" + m.completion_per_m + "</td><td>" + (m.context || "") + "</td></tr>"; }).join("")
+      + rows.map(function(m){ return "<tr><td class='mid' data-mid='" + esc(m.id) + "' style='cursor:pointer' title='click: fill test field'>" + esc(m.id) + "</td><td>" + (m.free ? "FREE" : "") + "</td><td>" + m.prompt_per_m + "</td><td>" + m.completion_per_m + "</td><td>" + (m.context || "") + "</td></tr>"; }).join("")
       + "</tbody></table></div>";
   };
   if (modelsCache){ render(); return; }
