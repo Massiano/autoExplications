@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>explication dashboard</title>
+<style>
+body { font-family: monospace; font-size: 13px; margin: 0; background: #f4f2ec; color: #222; }
+#wrap { width: 720px; max-width: 100%; margin: 0 auto; padding: 10px; box-sizing: border-box; }
+h1 { font-size: 16px; margin: 8px 0; }
+h2 { font-size: 14px; margin: 14px 0 6px 0; border-bottom: 1px solid #999; }
+.tabs { margin: 10px 0; }
+.tabs button { font-family: monospace; font-size: 13px; margin-right: 4px; padding: 4px 10px; border: 1px solid #888; background: #e8e4da; cursor: pointer; }
+.tabs button.on { background: #fff; font-weight: bold; }
+.pane { display: none; }
+.pane.on { display: block; }
+table { border-collapse: collapse; width: 100%; }
+td, th { border: 1px solid #bbb; padding: 3px 6px; text-align: left; vertical-align: top; }
+th { background: #e8e4da; }
+.word { background: #fff; border: 1px solid #bbb; margin: 6px 0; padding: 6px; }
+.word .t { font-weight: bold; }
+.grade-strict { color: #060; }
+.grade-almost { color: #850; }
+.grade-none { color: #a00; }
+.small { color: #666; font-size: 12px; }
+.qcbtn { font-family: monospace; font-size: 12px; margin: 0 2px; padding: 2px 6px; cursor: pointer; border: 1px solid #888; background: #eee; }
+.qcbtn.sel-good { background: #cec; }
+.qcbtn.sel-bad { background: #ecc; }
+.qcbtn.sel-meh { background: #eec; }
+textarea.note { width: 100%; box-sizing: border-box; font-family: monospace; font-size: 12px; height: 34px; margin-top: 3px; }
+#files { margin: 6px 0; }
+.exprow { cursor: pointer; }
+.exprow.sel { background: #ffd; }
+pre.bt { white-space: pre-wrap; background: #faf8f2; border: 1px dashed #ccc; padding: 4px; margin: 3px 0; }
+.bar { display: inline-block; height: 10px; background: #97b; vertical-align: middle; }
+.chips { line-height: 2; }
+.chip { display: inline-block; border: 1px solid #aaa; padding: 0 5px; margin: 1px; background: #fff; }
+.l-seed .chip { background: #e6eefc; }
+.l-adm .chip { background: #e8f6e8; }
+.l-ver .chip { background: #fdf3d8; }
+.l-scaf .chip { background: #f6e4e4; }
+#topbar { position: sticky; top: 0; background: #f4f2ec; padding: 4px 0; border-bottom: 1px solid #ccc; }
+input[type=text] { font-family: monospace; font-size: 13px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+<div id="topbar">
+<h1>explication pipeline dashboard</h1>
+<div id="files"><input type="file" id="fileinput" multiple accept=".json"> <span class="small">load one or more pipeline_state.json</span></div>
+<div class="tabs" id="tabs"></div>
+</div>
+
+<div class="pane" id="pane-runner">
+<h2>experiment runner</h2>
+<div>server: <input type="text" id="serverurl" size="30" value=""> <button class="qcbtn" onclick="connectServer()">connect</button> <span id="serverstatus" class="small"></span></div>
+<div id="runnerui" style="display:none">
+<h2>new experiment</h2>
+<div>
+id <input type="text" id="ne_id" size="16" placeholder="auto">
+wordlist <select id="ne_wordlist"></select>
+n_targets <input type="text" id="ne_n" size="4" value="30">
+model <input type="text" id="ne_model" size="24" value="openai/gpt-4o-mini"><br>
+k_bootstrap <input type="text" id="ne_kb" size="3" value="5">
+k_mine <input type="text" id="ne_km" size="3" value="5">
+min_share <input type="text" id="ne_ms" size="4" value="0.8">
+admit_top_n <input type="text" id="ne_admit" size="4" value="30">
+<button class="qcbtn" onclick="createExp()">create</button>
+</div>
+<h2>server experiments</h2>
+<table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table>
+<pre id="runlog" class="bt" style="max-height:200px;overflow:auto"></pre>
+</div>
+</div>
+
+<div class="pane" id="pane-experiments">
+<h2>experiments</h2>
+<table id="exptable"><thead><tr><th>file</th><th>schemes</th><th>targets</th><th>verified</th><th>strict</th><th>almost</th><th>unguessed</th></tr></thead><tbody></tbody></table>
+<div class="small">click a row to select the active experiment for the other tabs</div>
+</div>
+
+<div class="pane" id="pane-words">
+<h2>words</h2>
+<div><input type="text" id="wordfilter" placeholder="filter" size="20">
+<label><input type="checkbox" id="onlyverified"> verified only</label></div>
+<div id="wordlist"></div>
+</div>
+
+<div class="pane" id="pane-shell">
+<h2>shell layers</h2>
+<div id="shellsummary" class="small"></div>
+<div id="shelllayers"></div>
+</div>
+
+<div class="pane" id="pane-frontier">
+<h2>frontier (outside-shell counts)</h2>
+<div class="small">not failures: candidates for admission (prop), glue, or shell n+1 targets</div>
+<table id="fronttable"><thead><tr><th>word</th><th>count</th><th></th></tr></thead><tbody></tbody></table>
+</div>
+
+<div class="pane" id="pane-qc">
+<h2>manual quality check</h2>
+<div class="small">grades saved in browser memory only until exported. good / meh / bad + optional note per verified explication.</div>
+<div style="margin:6px 0"><button class="qcbtn" onclick="exportQC()">export QC annotations (json)</button></div>
+<div id="qclist"></div>
+</div>
+
+</div>
+<script>
+var experiments = [];
+var activeIdx = -1;
+var qc = {};
+
+var TABS = [["runner","runner"],["experiments","experiments"],["words","words"],["shell","shell"],["frontier","frontier"],["qc","QC"]];
+var tabsEl = document.getElementById("tabs");
+TABS.forEach(function(t){
+  var b = document.createElement("button");
+  b.textContent = t[1]; b.dataset.pane = t[0];
+  b.onclick = function(){ showPane(t[0]); };
+  tabsEl.appendChild(b);
+});
+function showPane(name){
+  document.querySelectorAll(".pane").forEach(function(p){ p.classList.remove("on"); });
+  document.querySelectorAll(".tabs button").forEach(function(b){ b.classList.toggle("on", b.dataset.pane === name); });
+  document.getElementById("pane-" + name).classList.add("on");
+}
+showPane("experiments");
+
+document.getElementById("fileinput").addEventListener("change", function(ev){
+  Array.prototype.forEach.call(ev.target.files, function(f){
+    var r = new FileReader();
+    r.onload = function(){
+      try {
+        var data = JSON.parse(r.result);
+        experiments.push({name: f.name, data: data});
+        if (activeIdx < 0) activeIdx = 0;
+        renderAll();
+      } catch(e){ alert("parse failed: " + f.name + " " + e); }
+    };
+    r.readAsText(f);
+  });
+  ev.target.value = "";
+});
+
+function exp(){ return activeIdx >= 0 ? experiments[activeIdx].data : null; }
+function expName(){ return activeIdx >= 0 ? experiments[activeIdx].name : ""; }
+
+function renderAll(){ renderExperiments(); renderWords(); renderShell(); renderFrontier(); renderQC(); }
+
+function stemish(w){ return [w, w.replace(/ies$/,"y"), w.replace(/es$/,""), w.replace(/s$/,""), w.replace(/ing$/,""), w.replace(/ing$/,"e"), w.replace(/ed$/,""), w.replace(/ed$/,"e")]; }
+function textUses(text, wordset){
+  var hits = {};
+  String(text).toLowerCase().replace(/[\u2019\u2018']/g," ").split(/[^a-z]+/).forEach(function(tok){
+    if (!tok) return;
+    stemish(tok).forEach(function(v){ if (wordset[v]) hits[wordset[v]] = 1; });
+  });
+  return Object.keys(hits);
+}
+
+function renderShell(){
+  var sm = document.getElementById("shellsummary"), el = document.getElementById("shelllayers");
+  sm.textContent = ""; el.innerHTML = "";
+  var d = exp(); if (!d) return;
+  var sh = d.shell;
+  if (!sh){ sm.textContent = "no shell layers in this state file (pre-shell version)"; return; }
+  var admittedAll = (sh.admitted || []).reduce(function(a, b){ return a.concat(b.words || []); }, []);
+  var taught = (sh.seed || []).length + admittedAll.length + (sh.verified_order || []).length;
+  sm.textContent = "taught: " + taught + " (seed " + (sh.seed || []).length + " + admitted " + admittedAll.length
+    + " + verified " + (sh.verified_order || []).length + ") | scaffold debt: " + (sh.scaffold || []).length
+    + " | full checking vocab: " + (d.controlled_vocab || []).length;
+  var ver = d.verified_explications || {};
+  function layer(title, words, cls, extraHtml){
+    var div = document.createElement("div"); div.className = "word";
+    div.innerHTML = "<div class='t'>" + title + " <span class='small'>(" + words.length + ")</span></div><div class='chips " + cls + "'>"
+      + words.map(function(w){ return "<span class='chip'>" + esc(w) + "</span>"; }).join("") + "</div>" + (extraHtml || "");
+    el.appendChild(div);
+  }
+  layer("seed — glue axioms (ablation-taught)", sh.seed || [], "l-seed");
+  (sh.admitted || []).forEach(function(b){
+    var wset = {};
+    (b.words || []).forEach(function(w){ stemish(w).forEach(function(v){ wset[v] = w; }); });
+    var edges = [];
+    (sh.verified_order || []).forEach(function(vw){
+      if (!ver[vw]) return;
+      var used = textUses(ver[vw], wset);
+      if (used.length) edges.push("<b>" + esc(vw) + "</b> drew on: " + used.map(esc).join(", "));
+    });
+    var extra = edges.length ? "<div class='small' style='margin-top:4px'>enabled (observational, not proven necessary):<br>" + edges.join("<br>") + "</div>" : "";
+    layer("admitted round " + b.round + " — ostensive (picture-taught)", b.words || [], "l-adm", extra);
+  });
+  layer("verified — riddle-taught, acquisition order", sh.verified_order || [], "l-ver");
+  layer("scaffold — UNTAUGHT debt (co-occurrence only)", sh.scaffold || [], "l-scaf");
+}
+
+function renderExperiments(){
+  var tb = document.querySelector("#exptable tbody"); tb.innerHTML = "";
+  experiments.forEach(function(e, i){
+    var d = e.data;
+    var ver = d.verified_explications || {};
+    var grades = d.grades || {};
+    var nStrict = 0, nAlmost = 0;
+    Object.keys(ver).forEach(function(w){ if (grades[w] === "almost") nAlmost++; else nStrict++; });
+    var tr = document.createElement("tr");
+    tr.className = "exprow" + (i === activeIdx ? " sel" : "");
+    tr.innerHTML = "<td>" + e.name + "</td><td>" + JSON.stringify(d.schemes || {}) + "</td><td>"
+      + Object.keys(d.bootstrap_texts || {}).length + "</td><td>" + Object.keys(ver).length + "</td><td>"
+      + nStrict + "</td><td>" + nAlmost + "</td><td>" + Object.keys(d.strict_but_unguessed || {}).length + "</td>";
+    tr.onclick = function(){ activeIdx = i; renderAll(); };
+    tb.appendChild(tr);
+  });
+}
+
+function renderWords(){
+  var el = document.getElementById("wordlist"); el.innerHTML = "";
+  var d = exp(); if (!d) return;
+  var filter = document.getElementById("wordfilter").value.toLowerCase();
+  var onlyV = document.getElementById("onlyverified").checked;
+  var ver = d.verified_explications || {}, grades = d.grades || {}, unv = d.strict_but_unguessed || {}, mg = d.misguesses || {}, bt = d.bootstrap_texts || {};
+  Object.keys(bt).forEach(function(w){
+    if (filter && w.indexOf(filter) < 0) return;
+    var isV = w in ver;
+    if (onlyV && !isV) return;
+    var div = document.createElement("div"); div.className = "word";
+    var g = isV ? (grades[w] || "strict") : (w in unv ? "unguessed" : "none");
+    var gcls = g === "strict" ? "grade-strict" : (g === "almost" ? "grade-almost" : "grade-none");
+    var html = "<div class='t'>" + w + " <span class='" + gcls + "'>[" + g + "]</span></div>";
+    if (isV) html += "<div>" + esc(ver[w]) + "</div>";
+    else if (w in unv) html += "<div>" + esc(unv[w]) + " <span class='small'>(in-shell, unguessed)</span></div>";
+    if ((mg[w] || []).length) html += "<div class='small'>misguesses: " + mg[w].map(esc).join(", ") + "</div>";
+    html += "<details><summary class='small'>bootstrap texts (" + (bt[w] || []).length + ")</summary>"
+      + (bt[w] || []).map(function(t){ return "<pre class='bt'>" + esc(t) + "</pre>"; }).join("") + "</details>";
+    div.innerHTML = html;
+    el.appendChild(div);
+  });
+}
+document.getElementById("wordfilter").addEventListener("input", renderWords);
+document.getElementById("onlyverified").addEventListener("change", renderWords);
+
+function renderFrontier(){
+  var tb = document.querySelector("#fronttable tbody"); tb.innerHTML = "";
+  var d = exp(); if (!d) return;
+  var vc = d.violation_counts || d.frontier_counts || {};
+  var rows = Object.keys(vc).map(function(w){ return [w, vc[w]]; }).sort(function(a,b){ return b[1] - a[1]; });
+  var max = rows.length ? rows[0][1] : 1;
+  rows.forEach(function(r){
+    var tr = document.createElement("tr");
+    tr.innerHTML = "<td>" + esc(r[0]) + "</td><td>" + r[1] + "</td><td><span class='bar' style='width:" + Math.round(200 * r[1] / max) + "px'></span></td>";
+    tb.appendChild(tr);
+  });
+}
+
+var server = ""; var pollTimer = null; var logEid = null;
+
+function connectServer(){
+  server = document.getElementById("serverurl").value.replace(/\/+$/, "");
+  fetch(server + "/api/wordlists").then(function(r){ return r.json(); }).then(function(wl){
+    document.getElementById("serverstatus").textContent = "connected";
+    document.getElementById("runnerui").style.display = "block";
+    var sel = document.getElementById("ne_wordlist"); sel.innerHTML = "";
+    Object.keys(wl).forEach(function(n){
+      var o = document.createElement("option"); o.value = n; o.textContent = n + " (" + wl[n] + " targets)"; sel.appendChild(o);
+    });
+    refreshRuns();
+    if (pollTimer) clearInterval(pollTimer);
+    pollTimer = setInterval(refreshRuns, 5000);
+  }).catch(function(e){ document.getElementById("serverstatus").textContent = "connect failed: " + e; });
+}
+
+function createExp(){
+  var body = {wordlist: document.getElementById("ne_wordlist").value,
+    n_targets: parseInt(document.getElementById("ne_n").value) || 30,
+    model: document.getElementById("ne_model").value,
+    k_bootstrap: parseInt(document.getElementById("ne_kb").value) || 5,
+    k_mine: parseInt(document.getElementById("ne_km").value) || 5,
+    min_share: parseFloat(document.getElementById("ne_ms").value) || 0.8,
+    admit_top_n: parseInt(document.getElementById("ne_admit").value) || 0};
+  var id = document.getElementById("ne_id").value.trim();
+  if (id) body.id = id;
+  fetch(server + "/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
+    .then(function(r){ return r.json(); }).then(function(res){
+      if (res.error) alert(res.error); else refreshRuns();
+    });
+}
+
+function refreshRuns(){
+  fetch(server + "/api/experiments").then(function(r){ return r.json(); }).then(function(list){
+    var tb = document.querySelector("#runtable tbody"); tb.innerHTML = "";
+    list.forEach(function(e){
+      var tr = document.createElement("tr");
+      tr.innerHTML = "<td>" + esc(e.id) + "</td><td>" + esc(e.status) + (e.error ? " <span class='grade-none'>" + esc(e.error) + "</span>" : "") + "</td><td>"
+        + e.n_targets + "</td><td>" + e.bootstrapped + "</td><td>" + e.verified + "</td><td class='small'>" + esc(e.model) + "</td>";
+      var td = document.createElement("td");
+      [["start", "/start"], ["stop", "/stop"]].forEach(function(a){
+        var b = document.createElement("button"); b.className = "qcbtn"; b.textContent = a[0];
+        b.onclick = function(){ fetch(server + "/api/experiments/" + e.id + a[1], {method: "POST"}).then(refreshRuns); };
+        td.appendChild(b);
+      });
+      var bl = document.createElement("button"); bl.className = "qcbtn"; bl.textContent = "log";
+      bl.onclick = function(){ logEid = e.id; refreshLog(); };
+      td.appendChild(bl);
+      var bv = document.createElement("button"); bv.className = "qcbtn"; bv.textContent = "load state";
+      bv.onclick = function(){
+        fetch(server + "/api/experiments/" + e.id + "/state").then(function(r){ return r.json(); }).then(function(st){
+          var name = e.id + " (server)";
+          var idx = experiments.findIndex(function(x){ return x.name === name; });
+          if (idx >= 0) experiments[idx].data = st; else { experiments.push({name: name, data: st}); idx = experiments.length - 1; }
+          activeIdx = idx; renderAll(); showPane("experiments");
+        });
+      };
+      td.appendChild(bv);
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    });
+    if (logEid) refreshLog();
+  }).catch(function(){});
+}
+
+function refreshLog(){
+  fetch(server + "/api/experiments/" + logEid + "/log?n=60").then(function(r){ return r.text(); }).then(function(t){
+    var el = document.getElementById("runlog"); el.textContent = "[" + logEid + "]\n" + t; el.scrollTop = el.scrollHeight;
+  });
+}
+
+function qcKey(w){ return expName() + "::" + w; }
+function renderQC(){
+  var el = document.getElementById("qclist"); el.innerHTML = "";
+  var d = exp(); if (!d) return;
+  var ver = d.verified_explications || {}, grades = d.grades || {};
+  Object.keys(ver).sort().forEach(function(w){
+    var k = qcKey(w);
+    var cur = qc[k] || {};
+    var div = document.createElement("div"); div.className = "word";
+    div.innerHTML = "<div class='t'>" + w + " <span class='small'>[" + (grades[w] || "strict") + "]</span></div><div>" + esc(ver[w]) + "</div>";
+    var btns = document.createElement("div");
+    ["good","meh","bad"].forEach(function(v){
+      var b = document.createElement("button");
+      b.className = "qcbtn" + (cur.verdict === v ? " sel-" + v : "");
+      b.textContent = v;
+      b.onclick = function(){ qc[k] = qc[k] || {}; qc[k].verdict = v; qc[k].word = w; qc[k].experiment = expName(); renderQC(); };
+      btns.appendChild(b);
+    });
+    div.appendChild(btns);
+    var ta = document.createElement("textarea"); ta.className = "note"; ta.placeholder = "note"; ta.value = cur.note || "";
+    ta.addEventListener("input", function(){ qc[k] = qc[k] || {word: w, experiment: expName()}; qc[k].note = ta.value; });
+    div.appendChild(ta);
+    el.appendChild(div);
+  });
+}
+
+function exportQC(){
+  var out = Object.keys(qc).map(function(k){ return qc[k]; });
+  var blob = new Blob([JSON.stringify(out, null, 2)], {type: "application/json"});
+  var a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "qc_annotations.json";
+  a.click();
+}
+
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+</script>
+</body>
+</html>
