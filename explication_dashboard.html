@@ -6,7 +6,7 @@
 <title>explication dashboard</title>
 <style>
 body { font-family: monospace; font-size: 13px; margin: 0; background: #f4f2ec; color: #222; }
-#wrap { width: 720px; max-width: 100%; margin: 0 auto; padding: 10px; box-sizing: border-box; }
+#wrap { width: 960px; max-width: 100%; margin: 0 auto; padding: 10px; box-sizing: border-box; }
 h1 { font-size: 16px; margin: 8px 0; }
 h2 { font-size: 14px; margin: 14px 0 6px 0; border-bottom: 1px solid #999; }
 .tabs { margin: 10px 0; }
@@ -14,7 +14,9 @@ h2 { font-size: 14px; margin: 14px 0 6px 0; border-bottom: 1px solid #999; }
 .tabs button.on { background: #fff; font-weight: bold; }
 .pane { display: none; }
 .pane.on { display: block; }
+.tw { overflow-x: auto; max-width: 100%; }
 table { border-collapse: collapse; width: 100%; }
+td { word-break: break-word; }
 td, th { border: 1px solid #bbb; padding: 3px 6px; text-align: left; vertical-align: top; }
 th { background: #e8e4da; }
 .word { background: #fff; border: 1px solid #bbb; margin: 6px 0; padding: 6px; }
@@ -68,7 +70,7 @@ admit_top_n <input type="text" id="ne_admit" size="4" value="30">
 <button class="qcbtn" onclick="createExp()">create</button>
 </div>
 <h2>server experiments</h2>
-<table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table>
+<div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
 <pre id="runlog" class="bt" style="max-height:200px;overflow:auto"></pre>
 </div>
 </div>
@@ -76,7 +78,7 @@ admit_top_n <input type="text" id="ne_admit" size="4" value="30">
 <div class="pane" id="pane-experiments">
 <h2>experiments</h2>
 <div id="schemedesc"></div>
-<table id="exptable"><thead><tr><th>file</th><th>schemes</th><th>targets</th><th>verified</th><th>strict</th><th>almost</th><th>unguessed</th></tr></thead><tbody></tbody></table>
+<div class="tw"><table id="exptable"><thead><tr><th>file</th><th>schemes</th><th>targets</th><th>verified</th><th>strict</th><th>almost</th><th>unguessed</th></tr></thead><tbody></tbody></table></div>
 <div class="small">click a row to select the active experiment for the other tabs</div>
 </div>
 
@@ -96,7 +98,7 @@ admit_top_n <input type="text" id="ne_admit" size="4" value="30">
 <div class="pane" id="pane-frontier">
 <h2>frontier (outside-shell counts)</h2>
 <div class="small">not failures: candidates for admission (prop), glue, or shell n+1 targets</div>
-<table id="fronttable"><thead><tr><th>word</th><th>count</th><th></th></tr></thead><tbody></tbody></table>
+<div class="tw"><table id="fronttable"><thead><tr><th>word</th><th>count</th><th></th></tr></thead><tbody></tbody></table></div>
 </div>
 
 <div class="pane" id="pane-qc">
@@ -373,6 +375,7 @@ function exportQC(){
 }
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+if (location.protocol.indexOf("http") === 0){ document.getElementById("serverurl").value = ""; connectServer(); }
 </script>
 </body>
 </html>
