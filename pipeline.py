@@ -89,16 +89,34 @@ def make_cached(svc):
         return result
     return cached
 
+PROVIDERS = {
+    "openrouter": {"base_url": "https://openrouter.ai/api/v1", "key_env": "OPENROUTER_API_KEY"},
+    "gemini": {"base_url": "https://generativelanguage.googleapis.com/v1beta/openai", "key_env": "GEMINI_API_KEY"},
+    "groq": {"base_url": "https://api.groq.com/openai/v1", "key_env": "GROQ_API_KEY"},
+    "mistral": {"base_url": "https://api.mistral.ai/v1", "key_env": "MISTRAL_API_KEY"},
+    "cerebras": {"base_url": "https://api.cerebras.ai/v1", "key_env": "CEREBRAS_API_KEY"},
+}
+
+def resolve_provider(model):
+    if "::" in model:
+        prov, slug = model.split("::", 1)
+        if prov not in PROVIDERS: raise ValueError(f"unknown provider '{prov}' (known: {list(PROVIDERS)})")
+        return PROVIDERS[prov], slug
+    return PROVIDERS["openrouter"], model
+
 def openrouter_raw(api_key, temperature, max_retries=6):
     def call(prompt, model):
+        provider, slug = resolve_provider(model)
+        key = os.environ.get(provider["key_env"], "") or api_key
+        if not key: raise RuntimeError(f"no api key: set {provider['key_env']}")
         backoff = 5.0
         for attempt in range(max_retries + 1):
-            resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers={"Authorization": f"Bearer {api_key}"}, json={"model": model, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
+            resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
             if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
                 wait = float(resp.headers.get("Retry-After", backoff))
                 time.sleep(min(wait, 300)); backoff = min(backoff * 2, 300); continue
             if resp.status_code >= 400:
-                raise RuntimeError(f"openrouter http {resp.status_code} for model '{model}': {resp.text[:300]}")
+                raise RuntimeError(f"http {resp.status_code} for model '{model}': {resp.text[:300]}")
             data = resp.json()
             if "error" in data:
                 err = data["error"]

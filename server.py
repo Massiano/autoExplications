@@ -131,6 +131,7 @@ def diag():
     except Exception as e: exps = str(e)
     d["experiments_on_disk"] = exps
     d["runners"] = {eid: {"status": r.status, "error": r.error, "thread_alive": bool(r.thread and r.thread.is_alive())} for eid, r in runners.items()}
+    d["provider_keys"] = {name: cfg["key_env"] + (" set" if cfg["key_env"] in os.environ else " NOT set") for name, cfg in pipeline.PROVIDERS.items()}
     d["env"] = {"EXP_DIR_set": "EXP_DIR" in os.environ, "OPENROUTER_API_KEY_set": "OPENROUTER_API_KEY" in os.environ, "PORT": os.environ.get("PORT", "(default)"), "railway_vars": {k: v for k, v in os.environ.items() if k.startswith("RAILWAY_") and "TOKEN" not in k and "SECRET" not in k}}
     d["process"] = {"python": sys.version.split()[0], "platform": platform.platform(), "pid": os.getpid(), "cwd": os.getcwd(), "uptime_s": int(time.time() - BOOT_TIME), "threads": threading.active_count()}
     try:
