@@ -121,8 +121,19 @@ class Pipeline:
         self._count = counted
         self.llm_sample = self._count(make_rate_limited(openrouter_raw(api_key, config.get("temp_sample", 0.6)), config.get("min_interval", 1.0)))
         self.llm_guess = make_cached(self._count(make_rate_limited(openrouter_raw(api_key, 0.0), config.get("min_interval", 1.0))))
-        self.model = config.get("model", "openai/gpt-4o-mini")
+        default_model = config.get("model", "openai/gpt-4o-mini")
+        mcfg = config.get("models", {})
+        def as_list(v): return v if isinstance(v, list) else [v]
+        self.role_models = {role: as_list(mcfg.get(role, default_model)) for role in ("sample", "guess", "judge")}
+        self._role_idx = {role: 0 for role in self.role_models}
+        self.model = default_model
         self.prompts = {**DEFAULT_PROMPTS[self.language], **config.get("prompts", {})}
+
+    def next_model(self, role):
+        ms = self.role_models[role]
+        m = ms[self._role_idx[role] % len(ms)]
+        self._role_idx[role] += 1
+        return m
 
     def _elapsed(self):
         m, s = divmod(int(time.monotonic() - getattr(self, "_t0", time.monotonic())), 60)
@@ -152,7 +163,7 @@ class Pipeline:
         for word in target_words:
             self.check_stop()
             if word in texts and texts[word]: continue
-            texts[word] = [self.llm_sample(prompts[i % len(prompts)].format(word=word), self.model).strip() for i in range(k)]
+            texts[word] = [self.llm_sample(prompts[i % len(prompts)].format(word=word), self.next_model("sample")).strip() for i in range(k)]
             self.log(f"[bootstrap] {word} done ({self._elapsed()})")
             self.save()
 
@@ -185,11 +196,11 @@ class Pipeline:
 
     def guess(self, text):
         prompt = self.prompts["guess_prompt"].format(text=text)
-        return self.llm_guess(prompt, self.model).strip().lower().strip(string.punctuation)
+        return self.llm_guess(prompt, self.next_model("guess")).strip().lower().strip(string.punctuation)
 
     def judge(self, target, guessed):
         prompt = self.prompts["judge_prompt"].format(target=target, guessed=guessed)
-        v = self.llm_guess(prompt, self.model).strip().lower().strip(string.punctuation)
+        v = self.llm_guess(prompt, self.next_model("judge")).strip().lower().strip(string.punctuation)
         return v if v in ("strict", "almost", "no") else "no"
 
     def grade(self, target, guessed):
@@ -206,7 +217,7 @@ class Pipeline:
             self.check_stop()
             source = sources[i % len(sources)] if sources else ""
             prompt = self.prompts["mine_prompt"].format(word=word, source=source, vocab_list=vocab_list)
-            text = self.llm_sample(prompt, self.model).strip()
+            text = self.llm_sample(prompt, self.next_model("sample")).strip()
             if self.uses_target(text, word): continue
             outside = self.find_outside(text, vocab)
             if outside:
@@ -223,7 +234,7 @@ class Pipeline:
 
     def run(self, target_words):
         self._t0 = time.monotonic(); self._calls = 0
-        self.state["schemes"] = {"bootstrap": "multi", "vocab": "intersect", "mine": "rewrite", "min_share": self.cfg.get("min_share", 0.8), "admit_top_n": self.cfg.get("admit_top_n", 0), "language": self.language, "model": self.model}
+        self.state["schemes"] = {"bootstrap": "multi", "vocab": "intersect", "mine": "rewrite", "min_share": self.cfg.get("min_share", 0.8), "admit_top_n": self.cfg.get("admit_top_n", 0), "language": self.language, "models": self.role_models}
         self.state["scheme_description"] = SCHEME_DESCRIPTION
         self.state["prompts"] = self.prompts
         self.save()
