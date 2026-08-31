@@ -18,6 +18,7 @@ h2 { font-size: 14px; margin: 14px 0 6px 0; border-bottom: 1px solid #999; }
 table { border-collapse: collapse; width: 100%; }
 td { word-break: break-word; }
 td, th { border: 1px solid #bbb; padding: 3px 6px; text-align: left; vertical-align: top; }
+.formtable td { border: none; padding: 2px 8px 2px 0; white-space: nowrap; }
 th { background: #e8e4da; }
 .word { background: #fff; border: 1px solid #bbb; margin: 6px 0; padding: 6px; }
 .word .t { font-weight: bold; }
@@ -61,19 +62,27 @@ input[type=text] { font-family: monospace; font-size: 13px; }
 <div>server: <input type="text" id="serverurl" size="30" value=""> <button class="qcbtn" onclick="connectServer()">connect</button> <span id="serverstatus" class="small"></span></div>
 <div id="runnerui" style="display:none">
 <h2>new experiment</h2>
-<div>
-id <input type="text" id="ne_id" size="16" placeholder="auto">
-wordlist <select id="ne_wordlist"></select>
-n_targets <input type="text" id="ne_n" size="4" value="30">
-model <input type="text" id="ne_model" size="24" value="openai/gpt-4o-mini"><br>
-k_bootstrap <input type="text" id="ne_kb" size="3" value="5">
-k_mine <input type="text" id="ne_km" size="3" value="5">
-min_share <input type="text" id="ne_ms" size="4" value="0.8">
-admit_top_n <input type="text" id="ne_admit" size="4" value="30">
-rounds <input type="text" id="ne_rounds" size="3" value="1">
-<button class="qcbtn" onclick="createExp()">create</button>
-&nbsp;|&nbsp; from config file: <input type="file" id="cfgfile" accept=".json">
-
+<table class="formtable">
+<tr><td>id</td><td><input type="text" id="ne_id" size="18" placeholder="auto"></td>
+    <td>wordlist</td><td><select id="ne_wordlist"></select></td>
+    <td>n_targets</td><td><input type="text" id="ne_n" size="5" value="30"></td></tr>
+<tr><td>model</td><td colspan="5"><input type="text" id="ne_model" size="44" value="openai/gpt-4o-mini"> <span class="small">(single model for all roles; use config json for per-role)</span></td></tr>
+<tr><td>k_bootstrap</td><td><input type="text" id="ne_kb" size="4" value="5"></td>
+    <td>k_mine</td><td><input type="text" id="ne_km" size="4" value="5"></td>
+    <td>min_share</td><td><input type="text" id="ne_ms" size="4" value="0.8"></td></tr>
+<tr><td>admit_top_n</td><td><input type="text" id="ne_admit" size="4" value="30"></td>
+    <td>rounds</td><td><input type="text" id="ne_rounds" size="4" value="1"></td>
+    <td></td><td></td></tr>
+</table>
+<div style="margin:6px 0">
+<button class="qcbtn" onclick="createExp()">create from form</button>
+<button class="qcbtn" onclick="document.getElementById('cfgfile').click()">create from file</button>
+<input type="file" id="cfgfile" accept=".json" style="display:none">
+<button class="qcbtn" onclick="togglePaste()">create from pasted json</button>
+</div>
+<div id="pastebox" style="display:none">
+<textarea id="cfgpaste" style="width:100%;height:120px;font-family:monospace;font-size:12px" placeholder='{"id": "...", "wordlist": "ltwf", "n_targets": 257, "models": {"sample": "...", "guess": "...", "judge": "..."}, ...}'></textarea>
+<button class="qcbtn" onclick="createFromPaste()">create</button>
 </div>
 <h2>server experiments</h2>
 <div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
