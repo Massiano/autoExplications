@@ -1,4 +1,4 @@
-import os, json, threading, traceback, time, glob
+import os, json, threading, traceback, time, glob, shutil, sys, platform
 from flask import Flask, request, jsonify, send_from_directory
 import pipeline
 
@@ -86,6 +86,65 @@ def get_runner(eid):
     with lock:
         if eid not in runners: runners[eid] = Runner(eid)
         return runners[eid]
+
+BOOT_TIME = time.time()
+
+@app.route("/api/diag")
+def diag():
+    d = {}
+    d["exp_dir"] = {"configured": os.environ.get("EXP_DIR", "(not set, default 'experiments')"), "resolved": os.path.abspath(EXP_DIR), "exists": os.path.isdir(EXP_DIR)}
+    try:
+        du = shutil.disk_usage(EXP_DIR)
+        d["exp_dir"]["disk"] = {"total_mb": du.total // 2**20, "used_mb": du.used // 2**20, "free_mb": du.free // 2**20}
+    except Exception as e: d["exp_dir"]["disk"] = str(e)
+    try:
+        root = shutil.disk_usage("/")
+        d["root_disk"] = {"total_mb": root.total // 2**20, "free_mb": root.free // 2**20}
+        d["exp_dir"]["on_separate_device"] = d["exp_dir"].get("disk", {}).get("total_mb") != d["root_disk"]["total_mb"] if isinstance(d["exp_dir"].get("disk"), dict) else None
+    except Exception as e: d["root_disk"] = str(e)
+    try:
+        st_exp = os.stat(os.path.abspath(EXP_DIR)); st_root = os.stat("/")
+        d["exp_dir"]["device_id"] = st_exp.st_dev; d["root_device_id"] = st_root.st_dev
+        d["exp_dir"]["is_own_mount"] = st_exp.st_dev != st_root.st_dev
+    except Exception as e: d["mount_check"] = str(e)
+    try:
+        probe = os.path.join(EXP_DIR, ".diag_probe")
+        with open(probe, "w") as f: f.write(str(time.time()))
+        with open(probe) as f: f.read()
+        os.remove(probe)
+        d["exp_dir"]["write_test"] = "ok"
+    except Exception as e: d["exp_dir"]["write_test"] = f"FAILED: {e}"
+    try:
+        mounts = [l for l in open("/proc/mounts") if "/data" in l or "overlay" in l.split()[2:3]]
+        d["mounts"] = [l.strip() for l in mounts][:10]
+    except Exception as e: d["mounts"] = str(e)
+    exps = []
+    try:
+        for eid in sorted(os.listdir(EXP_DIR)):
+            p = os.path.join(EXP_DIR, eid)
+            if not os.path.isdir(p): continue
+            files = {}
+            for fn in os.listdir(p):
+                fp = os.path.join(p, fn)
+                files[fn] = {"bytes": os.path.getsize(fp), "mtime": time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(fp)))}
+            exps.append({"id": eid, "files": files})
+    except Exception as e: exps = str(e)
+    d["experiments_on_disk"] = exps
+    d["runners"] = {eid: {"status": r.status, "error": r.error, "thread_alive": bool(r.thread and r.thread.is_alive())} for eid, r in runners.items()}
+    d["env"] = {"EXP_DIR_set": "EXP_DIR" in os.environ, "OPENROUTER_API_KEY_set": "OPENROUTER_API_KEY" in os.environ, "PORT": os.environ.get("PORT", "(default)"), "railway_vars": {k: v for k, v in os.environ.items() if k.startswith("RAILWAY_") and "TOKEN" not in k and "SECRET" not in k}}
+    d["process"] = {"python": sys.version.split()[0], "platform": platform.platform(), "pid": os.getpid(), "cwd": os.getcwd(), "uptime_s": int(time.time() - BOOT_TIME), "threads": threading.active_count()}
+    try:
+        import resource
+        d["process"]["max_rss_mb"] = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss // 1024
+    except Exception: pass
+    d["wordlists"] = sorted(os.path.basename(p) for p in glob.glob("wordlists/*.json"))
+    try:
+        import requests as _rq
+        t = time.monotonic()
+        r = _rq.get("https://openrouter.ai/api/v1/models", timeout=10)
+        d["openrouter_reachable"] = {"status": r.status_code, "ms": int((time.monotonic() - t) * 1000)}
+    except Exception as e: d["openrouter_reachable"] = str(e)
+    return jsonify(d)
 
 @app.route("/api/wordlists")
 def wordlists():
