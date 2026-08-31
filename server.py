@@ -51,6 +51,7 @@ class Runner:
         return True
 
     def _run(self):
+        t0 = time.monotonic()
         try:
             cfg = load_json(exp_path(self.eid, "config.json"), {})
             state = load_json(exp_path(self.eid, "state.json"), {})
@@ -59,9 +60,9 @@ class Runner:
             self.log(f"run start: {len(targets)} targets, model {p.model}")
             p.run(targets)
             self.status = "done"
-            self.log("run complete")
+            self.log(f"run complete in {time.monotonic() - t0:.0f}s")
         except pipeline.StopRequested:
-            self.status = "stopped"; self.log("stopped by request")
+            self.status = "stopped"; self.log(f"stopped by request after {time.monotonic() - t0:.0f}s")
         except Exception as e:
             self.status = "error"; self.error = str(e)
             self.log("ERROR: " + str(e))

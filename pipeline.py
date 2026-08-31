@@ -50,11 +50,23 @@ def seed_en():
 
 SEEDS = {"en": seed_en}
 
-BOOTSTRAP_MULTI_PROMPTS = {"en": [
-    "Explain the word '{word}' to a school kid, in simple everyday language. Use only very simple, common words. Do not use the word itself. Output only the explanation.",
-    "Describe '{word}' so a child who never heard the word would understand it. Keep every word as plain and common as possible. Do not use the word itself. Output only the description.",
-    "Say what '{word}' is, using the simplest and most common words you can. Short sentences. Do not use the word itself. Output only the text.",
-]}
+SCHEME_DESCRIPTION = (
+    "1 BOOTSTRAP: for each target word, ask the model k_bootstrap times for a simple explanation (rotating bootstrap_prompts), no filtering. "
+    "2 SHELL: per target, keep words appearing in >= min_share of its bootstrap texts (lemma-aware intersection); union these cores across targets; add the fixed seed (function words + NSM-like primes); words outside seed are marked scaffold (untaught debt). Re-apply previously admitted rounds, then admit the admit_top_n most frequent outside-shell words from accumulated counts (frontier), excluding words already in shell. "
+    "3 MINE: for each unverified target, up to k_mine attempts: mine_prompt asks to rewrite one of its bootstrap texts using only shell words, without the target word. Checks: target-word use (reject), outside-shell words (reject + count into frontier). "
+    "4 VERIFY: surviving text goes to a cold guesser (guess_prompt); lemma match = strict; otherwise a judge (judge_prompt) grades strict/almost/no. strict wins immediately; almost is kept while hunting strict; in-shell but unguessed texts are retained separately. Verified targets join the shell (acquisition order = curriculum)."
+)
+
+DEFAULT_PROMPTS = {"en": {
+    "bootstrap_prompts": [
+        "Explain the word '{word}' to a school kid, in simple everyday language. Use only very simple, common words. Do not use the word itself. Output only the explanation.",
+        "Describe '{word}' so a child who never heard the word would understand it. Keep every word as plain and common as possible. Do not use the word itself. Output only the description.",
+        "Say what '{word}' is, using the simplest and most common words you can. Short sentences. Do not use the word itself. Output only the text.",
+    ],
+    "mine_prompt": "Rewrite the following text so that a reader could still guess the word '{word}' from it. Every single word of your output must come from the allowed list. Shorten freely, drop or replace anything not on the list, restructure completely if needed. Do not use the word itself. Output only the rewritten text.\nText: {source}\nAllowed words: {vocab_list}",
+    "guess_prompt": "What single word is this text getting at? Text: '{text}'. Respond with ONLY the word.",
+    "judge_prompt": "Target word: '{target}'. A reader guessed: '{guessed}'. Did the reader correctly identify the target? Answer with exactly one word: 'strict' if it is the same word or a form of it, 'almost' if it is a synonym or very close in meaning, 'no' otherwise.",
+}}
 
 def make_rate_limited(svc, min_interval_seconds=1.0):
     last = {"t": 0.0}; lock = threading.Lock()
@@ -100,9 +112,21 @@ class Pipeline:
         self.language = config.get("language", "en")
         self.lemma_variants, self.canonical = lang_fns(self.language)
         api_key = os.environ["OPENROUTER_API_KEY"]
-        self.llm_sample = make_rate_limited(openrouter_raw(api_key, config.get("temp_sample", 0.6)), config.get("min_interval", 1.0))
-        self.llm_guess = make_cached(make_rate_limited(openrouter_raw(api_key, 0.0), config.get("min_interval", 1.0)))
+        self._calls = 0
+        def counted(svc):
+            def f(prompt, model):
+                self._calls += 1
+                return svc(prompt, model)
+            return f
+        self._count = counted
+        self.llm_sample = self._count(make_rate_limited(openrouter_raw(api_key, config.get("temp_sample", 0.6)), config.get("min_interval", 1.0)))
+        self.llm_guess = make_cached(self._count(make_rate_limited(openrouter_raw(api_key, 0.0), config.get("min_interval", 1.0))))
         self.model = config.get("model", "openai/gpt-4o-mini")
+        self.prompts = {**DEFAULT_PROMPTS[self.language], **config.get("prompts", {})}
+
+    def _elapsed(self):
+        m, s = divmod(int(time.monotonic() - getattr(self, "_t0", time.monotonic())), 60)
+        return f"{m}m{s:02d}s, {self._calls} calls"
 
     def check_stop(self):
         if self.stop_fn(): raise StopRequested()
@@ -123,13 +147,13 @@ class Pipeline:
         return any(self.lemma_variants(tok) & target for tok in tokenize(text))
 
     def bootstrap(self, target_words):
-        prompts = BOOTSTRAP_MULTI_PROMPTS[self.language]
+        prompts = self.prompts["bootstrap_prompts"]
         texts = self.state["bootstrap_texts"]; k = self.cfg.get("k_bootstrap", 5)
         for word in target_words:
             self.check_stop()
             if word in texts and texts[word]: continue
             texts[word] = [self.llm_sample(prompts[i % len(prompts)].format(word=word), self.model).strip() for i in range(k)]
-            self.log(f"[bootstrap] {word} done")
+            self.log(f"[bootstrap] {word} done ({self._elapsed()})")
             self.save()
 
     def build_vocab(self, target_words):
@@ -160,11 +184,11 @@ class Pipeline:
         return vocab
 
     def guess(self, text):
-        prompt = f"What single word is this text getting at? Text: '{text}'. Respond with ONLY the word."
+        prompt = self.prompts["guess_prompt"].format(text=text)
         return self.llm_guess(prompt, self.model).strip().lower().strip(string.punctuation)
 
     def judge(self, target, guessed):
-        prompt = f"Target word: '{target}'. A reader guessed: '{guessed}'. Did the reader correctly identify the target? Answer with exactly one word: 'strict' if it is the same word or a form of it, 'almost' if it is a synonym or very close in meaning, 'no' otherwise."
+        prompt = self.prompts["judge_prompt"].format(target=target, guessed=guessed)
         v = self.llm_guess(prompt, self.model).strip().lower().strip(string.punctuation)
         return v if v in ("strict", "almost", "no") else "no"
 
@@ -181,7 +205,7 @@ class Pipeline:
         for i in range(k):
             self.check_stop()
             source = sources[i % len(sources)] if sources else ""
-            prompt = f"Rewrite the following text so that a reader could still guess the word '{word}' from it. Every single word of your output must come from the allowed list. Shorten freely, drop or replace anything not on the list, restructure completely if needed. Do not use the word itself. Output only the rewritten text.\nText: {source}\nAllowed words: {vocab_list}"
+            prompt = self.prompts["mine_prompt"].format(word=word, source=source, vocab_list=vocab_list)
             text = self.llm_sample(prompt, self.model).strip()
             if self.uses_target(text, word): continue
             outside = self.find_outside(text, vocab)
@@ -198,7 +222,10 @@ class Pipeline:
         return best_grade, best_text, misguesses
 
     def run(self, target_words):
+        self._t0 = time.monotonic(); self._calls = 0
         self.state["schemes"] = {"bootstrap": "multi", "vocab": "intersect", "mine": "rewrite", "min_share": self.cfg.get("min_share", 0.8), "admit_top_n": self.cfg.get("admit_top_n", 0), "language": self.language, "model": self.model}
+        self.state["scheme_description"] = SCHEME_DESCRIPTION
+        self.state["prompts"] = self.prompts
         self.save()
         self.bootstrap(target_words)
         vocab = self.build_vocab(target_words)
@@ -214,15 +241,17 @@ class Pipeline:
                 if word not in self.state["shell"]["verified_order"]: self.state["shell"]["verified_order"].append(word)
                 self.state["strict_but_unguessed"].pop(word, None)
                 vocab |= self.lemma_variants(word.lower())
-                self.log(f"[mine] {word}: {grade}")
+                self.log(f"[mine] {word}: {grade} ({self._elapsed()})")
             elif grade == "unguessed" and text:
                 self.state["strict_but_unguessed"][word] = text
-                self.log(f"[mine] {word}: unguessed")
+                self.log(f"[mine] {word}: unguessed ({self._elapsed()})")
             else:
-                self.log(f"[mine] {word}: failed")
+                self.log(f"[mine] {word}: failed ({self._elapsed()})")
             self.state["controlled_vocab"] = sorted(self.display_vocab(vocab))
             self.save()
         self.state["failed_words"] = [w for w in target_words if w not in self.state["verified_explications"]]
+        self.state.setdefault("run_stats", []).append({"seconds": round(time.monotonic() - self._t0), "llm_calls": self._calls, "verified_total": len(self.state["verified_explications"])})
+        self.log(f"[stats] {self._calls} llm calls, {round(time.monotonic() - self._t0)}s")
         self.state["top_violations"] = Counter(self.state["violation_counts"]).most_common(50)
         self.save()
 

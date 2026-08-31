@@ -75,6 +75,7 @@ admit_top_n <input type="text" id="ne_admit" size="4" value="30">
 
 <div class="pane" id="pane-experiments">
 <h2>experiments</h2>
+<div id="schemedesc"></div>
 <table id="exptable"><thead><tr><th>file</th><th>schemes</th><th>targets</th><th>verified</th><th>strict</th><th>almost</th><th>unguessed</th></tr></thead><tbody></tbody></table>
 <div class="small">click a row to select the active experiment for the other tabs</div>
 </div>
@@ -194,6 +195,12 @@ function renderShell(){
 
 function renderExperiments(){
   var tb = document.querySelector("#exptable tbody"); tb.innerHTML = "";
+  var desc = document.getElementById("schemedesc");
+  var d = exp();
+  if (d && (d.scheme_description || d.prompts)){
+    desc.innerHTML = "<details><summary class='small'>scheme description & prompts (from state)</summary><pre class='bt'>"
+      + esc(d.scheme_description || "") + "</pre><pre class='bt'>" + esc(JSON.stringify(d.prompts || {}, null, 2)) + "</pre></details>";
+  } else desc.innerHTML = "";
   experiments.forEach(function(e, i){
     var d = e.data;
     var ver = d.verified_explications || {};
@@ -250,10 +257,11 @@ function renderFrontier(){
 }
 
 var server = ""; var pollTimer = null; var logEid = null;
+function api(path, opts){ return fetch(server + path, opts); }
 
 function connectServer(){
   server = document.getElementById("serverurl").value.replace(/\/+$/, "");
-  fetch(server + "/api/wordlists").then(function(r){ return r.json(); }).then(function(wl){
+  api("/api/wordlists").then(function(r){ return r.json(); }).then(function(wl){
     document.getElementById("serverstatus").textContent = "connected";
     document.getElementById("runnerui").style.display = "block";
     var sel = document.getElementById("ne_wordlist"); sel.innerHTML = "";
@@ -276,14 +284,14 @@ function createExp(){
     admit_top_n: parseInt(document.getElementById("ne_admit").value) || 0};
   var id = document.getElementById("ne_id").value.trim();
   if (id) body.id = id;
-  fetch(server + "/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
+  api("/api/experiments", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)})
     .then(function(r){ return r.json(); }).then(function(res){
       if (res.error) alert(res.error); else refreshRuns();
     });
 }
 
 function refreshRuns(){
-  fetch(server + "/api/experiments").then(function(r){ return r.json(); }).then(function(list){
+  api("/api/experiments").then(function(r){ return r.json(); }).then(function(list){
     var tb = document.querySelector("#runtable tbody"); tb.innerHTML = "";
     list.forEach(function(e){
       var tr = document.createElement("tr");
@@ -292,15 +300,23 @@ function refreshRuns(){
       var td = document.createElement("td");
       [["start", "/start"], ["stop", "/stop"]].forEach(function(a){
         var b = document.createElement("button"); b.className = "qcbtn"; b.textContent = a[0];
-        b.onclick = function(){ fetch(server + "/api/experiments/" + e.id + a[1], {method: "POST"}).then(refreshRuns); };
+        b.onclick = function(){ api("/api/experiments/" + e.id + a[1], {method: "POST"}).then(refreshRuns); };
         td.appendChild(b);
       });
+      var bd = document.createElement("button"); bd.className = "qcbtn"; bd.textContent = "download";
+      bd.onclick = function(){
+        api("/api/experiments/" + e.id + "/state").then(function(r){ return r.json(); }).then(function(st){
+          var blob = new Blob([JSON.stringify(st, null, 2)], {type: "application/json"});
+          var a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = e.id + "_state.json"; a.click();
+        });
+      };
+      td.appendChild(bd);
       var bl = document.createElement("button"); bl.className = "qcbtn"; bl.textContent = "log";
       bl.onclick = function(){ logEid = e.id; refreshLog(); };
       td.appendChild(bl);
       var bv = document.createElement("button"); bv.className = "qcbtn"; bv.textContent = "load state";
       bv.onclick = function(){
-        fetch(server + "/api/experiments/" + e.id + "/state").then(function(r){ return r.json(); }).then(function(st){
+        api("/api/experiments/" + e.id + "/state").then(function(r){ return r.json(); }).then(function(st){
           var name = e.id + " (server)";
           var idx = experiments.findIndex(function(x){ return x.name === name; });
           if (idx >= 0) experiments[idx].data = st; else { experiments.push({name: name, data: st}); idx = experiments.length - 1; }
@@ -316,7 +332,7 @@ function refreshRuns(){
 }
 
 function refreshLog(){
-  fetch(server + "/api/experiments/" + logEid + "/log?n=60").then(function(r){ return r.text(); }).then(function(t){
+  api("/api/experiments/" + logEid + "/log?n=60").then(function(r){ return r.text(); }).then(function(t){
     var el = document.getElementById("runlog"); el.textContent = "[" + logEid + "]\n" + t; el.scrollTop = el.scrollHeight;
   });
 }
