@@ -165,34 +165,49 @@ def openrouter_models():
     out.sort(key=lambda x: (not x["free"], x["id"]))
     return jsonify({"count": len(out), "free_count": sum(1 for x in out if x["free"]), "models": out})
 
+test_jobs = {}
+
 @app.route("/api/test_models", methods=["POST"])
 def test_models():
     body = request.get_json(force=True)
-    models = [m.strip() for m in body.get("models", []) if m.strip()]
-    words = [w.strip() for w in body.get("words", []) if w.strip()] or ["fire"]
+    models = [m.strip() for m in body.get("models", []) if m.strip()][:8]
+    words = ([w.strip() for w in body.get("words", []) if w.strip()] or ["fire"])[:5]
     prompt_tpl = body.get("prompt") or None
     guess_model = body.get("guess_model", "").strip() or None
     if not models: return jsonify({"error": "no models"}), 400
     import pipeline as pl
     if prompt_tpl is None: prompt_tpl = pl.DEFAULT_PROMPTS["en"]["bootstrap_prompts"][0]
-    svc = pl.openrouter_raw(os.environ["OPENROUTER_API_KEY"], 0.6, max_retries=1)
-    results = []
-    for model in models[:8]:
-        for word in words[:5]:
-            r = {"model": model, "word": word}
-            t = time.monotonic()
-            try:
-                text = svc(prompt_tpl.format(word=word), model).strip()
-                r["explication"] = text
-                r["ms"] = int((time.monotonic() - t) * 1000)
-                gm = guess_model or model
-                guess = svc(pl.DEFAULT_PROMPTS["en"]["guess_prompt"].format(text=text), gm).strip()
-                r["guess"] = guess; r["guess_model"] = gm
-                r["ok"] = word.lower() in guess.lower()
-            except Exception as e:
-                r["error"] = str(e)
-            results.append(r)
-    return jsonify({"prompt": prompt_tpl, "results": results})
+    jid = f"job_{int(time.time() * 1000)}"
+    job = {"done": False, "total": len(models) * len(words), "completed": 0, "log": [], "results": [], "prompt": prompt_tpl}
+    test_jobs[jid] = job
+    def work():
+        svc = pl.openrouter_raw(os.environ["OPENROUTER_API_KEY"], 0.6, max_retries=1)
+        for model in models:
+            for word in words:
+                r = {"model": model, "word": word}
+                t = time.monotonic()
+                try:
+                    text = svc(prompt_tpl.format(word=word), model).strip()
+                    r["explication"] = text; r["ms"] = int((time.monotonic() - t) * 1000)
+                    gm = guess_model or model
+                    guess = svc(pl.DEFAULT_PROMPTS["en"]["guess_prompt"].format(text=text), gm).strip()
+                    r["guess"] = guess; r["guess_model"] = gm
+                    r["ok"] = word.lower() in guess.lower()
+                    job["log"].append(f"{model} / {word}: {'OK' if r['ok'] else 'MISS (' + guess + ')'} {r['ms']}ms")
+                except Exception as e:
+                    r["error"] = str(e)
+                    job["log"].append(f"{model} / {word}: ERROR {e}")
+                job["results"].append(r)
+                job["completed"] += 1
+        job["done"] = True
+    threading.Thread(target=work, daemon=True).start()
+    return jsonify({"job": jid})
+
+@app.route("/api/test_models/<jid>")
+def test_models_status(jid):
+    job = test_jobs.get(jid)
+    if not job: return jsonify({"error": "unknown job"}), 404
+    return jsonify(job)
 
 @app.route("/api/wordlists")
 def wordlists():
