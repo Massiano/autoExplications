@@ -165,6 +165,30 @@ def openrouter_models():
     out.sort(key=lambda x: (not x["free"], x["id"]))
     return jsonify({"count": len(out), "free_count": sum(1 for x in out if x["free"]), "models": out})
 
+@app.route("/api/test_model", methods=["POST"])
+def test_model():
+    body = request.get_json(force=True)
+    model = body.get("model", "").strip()
+    word = body.get("word", "fire")
+    if not model: return jsonify({"error": "no model"}), 400
+    import pipeline as pl
+    svc = pl.openrouter_raw(os.environ["OPENROUTER_API_KEY"], 0.6, max_retries=1)
+    out = {"model": model, "word": word}
+    t = time.monotonic()
+    try:
+        prompt = pl.DEFAULT_PROMPTS["en"]["bootstrap_prompts"][0].format(word=word)
+        text = svc(prompt, model).strip()
+        out["explication"] = text
+        out["explication_ms"] = int((time.monotonic() - t) * 1000)
+        t2 = time.monotonic()
+        guess = svc(pl.DEFAULT_PROMPTS["en"]["guess_prompt"].format(text=text), model).strip()
+        out["guess"] = guess
+        out["guess_ms"] = int((time.monotonic() - t2) * 1000)
+        out["roundtrip_ok"] = word.lower() in guess.lower()
+    except Exception as e:
+        out["error"] = str(e)
+    return jsonify(out)
+
 @app.route("/api/wordlists")
 def wordlists():
     out = {}

@@ -74,6 +74,7 @@ rounds <input type="text" id="ne_rounds" size="3" value="1">
 <button class="qcbtn" onclick="createExp()">create</button>
 &nbsp;|&nbsp; from config file: <input type="file" id="cfgfile" accept=".json">
 &nbsp;|&nbsp; <button class="qcbtn" onclick="showModels()">openrouter models</button> <input type="text" id="modelfilter" size="12" placeholder="filter">
+&nbsp;|&nbsp; test model: <input type="text" id="testmodel" size="26" placeholder="model id"> word <input type="text" id="testword" size="7" value="fire"> <button class="qcbtn" onclick="testModel()">run test</button>
 </div>
 <h2>server experiments</h2>
 <div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
@@ -400,6 +401,18 @@ function refreshRuns(){
   }).catch(function(){});
 }
 
+function testModel(){
+  var model = document.getElementById("testmodel").value.trim();
+  var word = document.getElementById("testword").value.trim() || "fire";
+  var el = document.getElementById("modellist");
+  el.innerHTML = "<pre class='bt'>testing " + esc(model) + " with '" + esc(word) + "'...</pre>";
+  api("/api/test_model", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({model: model, word: word})})
+    .then(function(r){ return r.json(); }).then(function(d){
+      if (d.error){ el.innerHTML = "<pre class='bt'>FAILED: " + esc(d.error) + "</pre>"; return; }
+      el.innerHTML = "<pre class='bt'>explication (" + d.explication_ms + "ms):\n" + esc(d.explication)
+        + "\n\nself-guess (" + d.guess_ms + "ms): " + esc(d.guess) + "  ->  " + (d.roundtrip_ok ? "ROUNDTRIP OK" : "MISSED") + "</pre>";
+    }).catch(function(e){ el.innerHTML = "<pre class='bt'>request failed: " + esc(String(e)) + "</pre>"; });
+}
 var modelsCache = null;
 function showModels(){
   var el = document.getElementById("modellist");
@@ -409,7 +422,7 @@ function showModels(){
     var rows = modelsCache.models.filter(function(m){ return !f || m.id.toLowerCase().indexOf(f) >= 0; }).slice(0, 200);
     el.innerHTML = "<div class='small'>" + modelsCache.free_count + " free / " + modelsCache.count + " total (click id to copy)</div>"
       + "<div class='tw'><table><thead><tr><th>id</th><th>free</th><th>$/M in</th><th>$/M out</th><th>ctx</th></tr></thead><tbody>"
-      + rows.map(function(m){ return "<tr><td style='cursor:pointer' onclick='navigator.clipboard.writeText(\"" + m.id + "\")'>" + esc(m.id) + "</td><td>" + (m.free ? "FREE" : "") + "</td><td>" + m.prompt_per_m + "</td><td>" + m.completion_per_m + "</td><td>" + (m.context || "") + "</td></tr>"; }).join("")
+      + rows.map(function(m){ return "<tr><td style='cursor:pointer' onclick='document.getElementById("testmodel").value=(\"" + m.id + "\")'>" + esc(m.id) + "</td><td>" + (m.free ? "FREE" : "") + "</td><td>" + m.prompt_per_m + "</td><td>" + m.completion_per_m + "</td><td>" + (m.context || "") + "</td></tr>"; }).join("")
       + "</tbody></table></div>";
   };
   if (modelsCache){ render(); return; }
