@@ -112,17 +112,17 @@ def openrouter_raw(api_key, temperature, max_retries=3):
         backoff = 5.0
         for attempt in range(max_retries + 1):
             resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
-            if resp.status_code in (429, 500, 502, 503, 504) and attempt < max_retries:
+            if resp.status_code in (500, 502, 503, 504) and attempt < max_retries:
                 wait = min(float(resp.headers.get("Retry-After", backoff)), 300)
-                _rlog(f"[quota/backoff] {model}: http {resp.status_code}, sleeping {wait:.0f}s (attempt {attempt + 1}/{max_retries})")
+                _rlog(f"[backoff] {model}: http {resp.status_code}, sleeping {wait:.0f}s (attempt {attempt + 1}/{max_retries})")
                 interruptible_sleep(wait); backoff = min(backoff * 2, 300); continue
             if resp.status_code >= 400:
                 raise RuntimeError(f"http {resp.status_code} for model '{model}': {resp.text[:300]}")
             data = resp.json()
             if "error" in data:
                 err = data["error"]
-                if isinstance(err, dict) and err.get("code") in (429, 500, 502, 503, 504) and attempt < max_retries:
-                    _rlog(f"[quota/backoff] {model}: error {err.get('code')}, sleeping {backoff:.0f}s (attempt {attempt + 1}/{max_retries})")
+                if isinstance(err, dict) and err.get("code") in (500, 502, 503, 504) and attempt < max_retries:
+                    _rlog(f"[backoff] {model}: error {err.get('code')}, sleeping {backoff:.0f}s (attempt {attempt + 1}/{max_retries})")
                     interruptible_sleep(backoff); backoff = min(backoff * 2, 300); continue
                 raise RuntimeError(f"openrouter error: {err}")
             content = data["choices"][0]["message"]["content"]
@@ -187,7 +187,7 @@ class Pipeline:
 
     def call_role(self, role, prompt):
         client = self.llm_sample if role == "sample" else self.llm_guess
-        bench_minutes = self.cfg.get("bench_minutes", 30)
+        bench_minutes = self.cfg.get("bench_minutes", 5)
         while True:
             now = time.monotonic()
             available = [m for m in self.role_models[role] if self.bench.get(m, 0) <= now]
