@@ -203,8 +203,8 @@ function renderShell(){
   if (!sh){ sm.textContent = "no shell layers in this state file (pre-shell version)"; return; }
   var admittedAll = (sh.admitted || []).reduce(function(a, b){ return a.concat(b.words || []); }, []);
   var taught = (sh.seed || []).length + admittedAll.length + (sh.verified_order || []).length;
-  sm.textContent = "taught: " + taught + " (seed " + (sh.seed || []).length + " + admitted " + admittedAll.length
-    + " + verified " + (sh.verified_order || []).length + ") | scaffold debt: " + (sh.scaffold || []).length
+  sm.textContent = "in shell: " + taught + " (seed " + (sh.seed || []).length + " + admitted " + admittedAll.length
+    + " + verified " + (sh.verified_order || []).length + ") | scaffold: " + (sh.scaffold || []).length
     + " | full checking vocab: " + (d.controlled_vocab || []).length;
   var ver = d.verified_explications || {};
   function layer(title, words, cls, extraHtml){
@@ -213,7 +213,7 @@ function renderShell(){
       + words.map(function(w){ return "<span class='chip'>" + esc(w) + "</span>"; }).join("") + "</div>" + (extraHtml || "");
     el.appendChild(div);
   }
-  layer("seed — glue axioms (ablation-taught)", sh.seed || [], "l-seed");
+  layer("seed — fixed (function words + primes)", sh.seed || [], "l-seed");
   (sh.admitted || []).forEach(function(b){
     var wset = {};
     (b.words || []).forEach(function(w){ stemish(w).forEach(function(v){ wset[v] = w; }); });
@@ -224,7 +224,7 @@ function renderShell(){
       if (used.length) edges.push("<b>" + esc(vw) + "</b> drew on: " + used.map(esc).join(", "));
     });
     var extra = edges.length ? "<div class='small' style='margin-top:4px'>enabled (observational, not proven necessary):<br>" + edges.join("<br>") + "</div>" : "";
-    layer("admitted round " + b.round + " — ostensive (picture-taught)", b.words || [], "l-adm", extra);
+    layer("admitted round " + b.round + " — top frontier words", b.words || [], "l-adm", extra);
   });
   var grades = d.grades || {};
   var vo = (sh.verified_order || []).slice();
@@ -234,13 +234,13 @@ function renderShell(){
   if (mode === "alpha") vo.sort();
   var unv = Object.keys(d.strict_but_unguessed || {}).sort();
   var div = document.createElement("div"); div.className = "word";
-  div.innerHTML = "<div class='t'>verified — riddle-taught <span class='small'>(" + vo.length + ")</span> " + sortSel
+  div.innerHTML = "<div class='t'>verified — cracked targets <span class='small'>(" + vo.length + ")</span> " + sortSel
     + " <span class='small'><span class='chip g-strict'>strict</span> <span class='chip g-almost'>almost</span> <span class='chip g-unguessed'>in-shell, unguessed</span></span></div>"
     + "<div class='chips l-ver'>" + vo.map(function(w){ var g = grades[w] || "strict"; return "<span class='chip g-" + g + "'>" + esc(w) + "</span>"; }).join("") + "</div>"
     + (unv.length ? "<div class='chips' style='margin-top:4px'>" + unv.map(function(w){ return "<span class='chip g-unguessed'>" + esc(w) + "</span>"; }).join("") + "</div>" : "");
   el.appendChild(div);
   var sel = div.querySelector("#versort"); if (sel) sel.value = mode;
-  layer("scaffold — UNTAUGHT debt (co-occurrence only)", sh.scaffold || [], "l-scaf");
+  layer("scaffold — bootstrap co-occurrence only (unaccounted)", sh.scaffold || [], "l-scaf");
 }
 
 function renderExperiments(){
