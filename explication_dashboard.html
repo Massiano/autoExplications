@@ -35,6 +35,10 @@ textarea.note { width: 100%; box-sizing: border-box; font-family: monospace; fon
 .exprow { cursor: pointer; }
 .exprow.sel { background: #ffd; }
 pre.bt { white-space: pre-wrap; background: #faf8f2; border: 1px dashed #ccc; padding: 4px; margin: 3px 0; }
+.runcard { border: 1px solid #aaa; background: #fdfcf8; padding: 6px 8px; margin: 8px 0; }
+.runcard .rc-head { font-weight: bold; }
+.runcard .rc-stats { color: #555; font-size: 12px; margin: 2px 0 4px 0; }
+.runcard pre.bt { max-height: 240px; overflow: auto; }
 .bar { display: inline-block; height: 10px; background: #97b; vertical-align: middle; }
 .chips { line-height: 2; }
 .chip { display: inline-block; border: 1px solid #aaa; padding: 0 5px; margin: 1px; background: #fff; }
@@ -85,8 +89,7 @@ input[type=text] { font-family: monospace; font-size: 13px; }
 <button class="qcbtn" onclick="createFromPaste()">create</button>
 </div>
 <h2>server experiments</h2>
-<div class="tw"><table id="runtable"><thead><tr><th>id</th><th>status</th><th>targets</th><th>bootstrapped</th><th>verified</th><th>model</th><th>actions</th></tr></thead><tbody></tbody></table></div>
-<pre id="runlog" class="bt" style="max-height:200px;overflow:auto"></pre>
+<div id="runcards"></div>
 <div id="modellist"></div>
 </div>
 </div>
@@ -303,7 +306,7 @@ function renderFrontier(){
   });
 }
 
-var server = ""; var pollTimer = null; var logEid = null;
+var server = ""; var pollTimer = null;
 function api(path, opts){ return fetch(server + path, opts); }
 
 function connectServer(){
@@ -365,21 +368,19 @@ function createExp(){
     });
 }
 
+var openPanes = {};
 function refreshRuns(){
   api("/api/experiments").then(function(r){ return r.json(); }).then(function(list){
-    var tb = document.querySelector("#runtable tbody"); tb.innerHTML = "";
+    var wrap = document.getElementById("runcards"); wrap.innerHTML = "";
     list.forEach(function(e){
-      var tr = document.createElement("tr");
-      tr.innerHTML = "<td style='cursor:pointer' title='click: show config'>" + esc(e.id) + "</td><td>" + esc(e.status) + (e.error ? " <span class='grade-none'>" + esc(e.error) + "</span>" : "") + "</td><td>"
-        + e.n_targets + "</td><td>" + e.bootstrapped + "</td><td>" + e.verified + "</td><td class='small'>" + esc(e.model) + "</td>";
-      tr.cells[0].onclick = function(){
-        if (logEid === "cfg:" + e.id){ logEid = null; document.getElementById("runlog").textContent = ""; return; }
-        api("/api/experiments/" + e.id + "/config").then(function(r){ return r.json(); }).then(function(cfg){
-          logEid = "cfg:" + e.id;
-          document.getElementById("runlog").textContent = "[config " + e.id + " — immutable; use clone to vary]\n" + JSON.stringify(cfg, null, 2);
-        });
-      };
-      var td = document.createElement("td");
+      var card = document.createElement("div"); card.className = "runcard";
+      var head = document.createElement("div"); head.className = "rc-head";
+      head.innerHTML = esc(e.id) + " &mdash; " + esc(e.status) + (e.error ? " <span class='grade-none' title='" + esc(e.error).replace(/'/g, "&#39;") + "'>error: " + errCause(e.error) + " (see log)</span>" : "");
+      card.appendChild(head);
+      var stats = document.createElement("div"); stats.className = "rc-stats";
+      stats.textContent = e.n_targets + " targets | " + e.bootstrapped + " bootstrapped | " + e.verified + " verified | " + e.model;
+      card.appendChild(stats);
+      var td = document.createElement("div");
       [["start", "/start"], ["stop", "/stop"]].forEach(function(a){
         var b = document.createElement("button"); b.className = "qcbtn"; b.textContent = a[0];
         b.onclick = function(){ api("/api/experiments/" + e.id + a[1], {method: "POST"}).then(refreshRuns); };
@@ -398,7 +399,13 @@ function refreshRuns(){
         });
       };
       td.appendChild(bc);
-      var bcd = document.createElement("button"); bcd.className = "qcbtn"; bcd.textContent = "config";
+      var bcfg = document.createElement("button"); bcfg.className = "qcbtn"; bcfg.textContent = "config";
+      bcfg.onclick = function(){
+        if (openPanes[e.id] === "cfg"){ delete openPanes[e.id]; refreshRuns(); return; }
+        openPanes[e.id] = "cfg"; refreshRuns();
+      };
+      td.appendChild(bcfg);
+      var bcd = document.createElement("button"); bcd.className = "qcbtn"; bcd.textContent = "cfg dl";
       bcd.onclick = function(){
         api("/api/experiments/" + e.id + "/config").then(function(r){ return r.json(); }).then(function(cfg){
           var blob = new Blob([JSON.stringify(cfg, null, 2)], {type: "application/json"});
@@ -416,8 +423,8 @@ function refreshRuns(){
       td.appendChild(bd);
       var bl = document.createElement("button"); bl.className = "qcbtn"; bl.textContent = "log";
       bl.onclick = function(){
-        if (logEid === e.id){ logEid = null; document.getElementById("runlog").textContent = ""; }
-        else { logEid = e.id; refreshLog(); }
+        if (openPanes[e.id] === "log"){ delete openPanes[e.id]; refreshRuns(); return; }
+        openPanes[e.id] = "log"; refreshRuns();
       };
       td.appendChild(bl);
       var bv = document.createElement("button"); bv.className = "qcbtn"; bv.textContent = "load state";
@@ -434,15 +441,35 @@ function refreshRuns(){
       bx.onclick = function(){
         if (!confirm("delete experiment '" + e.id + "' and all its data on the server? (download state first if you want it)")) return;
         api("/api/experiments/" + e.id + "/delete", {method: "POST"}).then(function(r){ return r.json(); }).then(function(res){
-          if (res.error) alert(res.error); else refreshRuns();
+          if (res.error) alert(res.error); else { delete openPanes[e.id]; refreshRuns(); }
         });
       };
       td.appendChild(bx);
-      tr.appendChild(td);
-      tb.appendChild(tr);
+      card.appendChild(td);
+      if (openPanes[e.id]){
+        var pre = document.createElement("pre"); pre.className = "bt"; pre.id = "rl_" + e.id;
+        pre.textContent = "...";
+        card.appendChild(pre);
+      }
+      wrap.appendChild(card);
     });
-    if (logEid) refreshLog();
+    Object.keys(openPanes).forEach(refreshPane);
   }).catch(function(){});
+}
+
+function refreshPane(eid){
+  var pre = document.getElementById("rl_" + eid); if (!pre) return;
+  if (openPanes[eid] === "cfg"){
+    api("/api/experiments/" + eid + "/config").then(function(r){ return r.json(); }).then(function(cfg){
+      pre.textContent = "[config — immutable; use clone to vary]\n" + JSON.stringify(cfg, null, 2);
+    });
+  } else {
+    api("/api/experiments/" + eid + "/log?n=150").then(function(r){ return r.text(); }).then(function(t){
+      var atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
+      pre.textContent = t || "(empty log)";
+      if (atBottom) pre.scrollTop = pre.scrollHeight;
+    });
+  }
 }
 
 function runModelTest(){
@@ -468,7 +495,7 @@ function runModelTest(){
             var oks = rs.filter(function(r){ return r.ok; }).length;
             return "<div class='word'><div class='t'>" + esc(m) + " <span class='small'>" + oks + "/" + rs.length + " roundtrip</span></div>"
               + rs.map(function(r){
-                  if (r.error) return "<div class='grade-none'>" + esc(r.word) + ": " + esc(r.error) + "</div>";
+                  if (r.error) return "<div class='grade-none' title='" + esc(r.error).replace(/'/g, "&#39;") + "'>" + esc(r.word) + ": error, " + errCause(r.error) + "</div>";
                   return "<div><b>" + esc(r.word) + "</b> (" + r.ms + "ms) guess: " + esc(r.guess) + " " + (r.ok ? "<span class='grade-strict'>OK</span>" : "<span class='grade-none'>MISS</span>")
                     + "<pre class='bt'>" + esc(r.explication) + "</pre></div>";
                 }).join("") + "</div>";
@@ -510,12 +537,6 @@ function showModels(){
   }).catch(function(e){ el.innerHTML = "<pre class='bt'>catalog load failed: " + esc(String(e)) + "</pre>"; });
 }
 
-function refreshLog(){
-  if (!logEid || logEid.indexOf("cfg:") === 0) return;
-  api("/api/experiments/" + logEid + "/log?n=60").then(function(r){ return r.text(); }).then(function(t){
-    var el = document.getElementById("runlog"); el.textContent = "[" + logEid + "]\n" + t; el.scrollTop = el.scrollHeight;
-  });
-}
 
 function qcKey(w){ return expName() + "::" + w; }
 function renderQC(){
@@ -553,6 +574,17 @@ function exportQC(){
 }
 
 function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+function errCause(s){
+  s = String(s);
+  if (/402|credit|afford|insufficient/i.test(s)) return "out of credits on provider";
+  if (/401|invalid.?api.?key|no api key|unauthorized/i.test(s)) return "missing or invalid API key";
+  if (/404|not found|no endpoints|unknown provider/i.test(s)) return "model slug not found";
+  if (/429|rate.?limit|quota/i.test(s)) return "rate limited / quota exhausted";
+  if (/timeout|timed out/i.test(s)) return "provider timeout";
+  if (/moderation|flagged/i.test(s)) return "content moderation block";
+  if (/empty completion/i.test(s)) return "model returned empty output";
+  return "provider error";
+}
 if (location.protocol.indexOf("http") === 0){
   document.getElementById("serverurl").value = "";
   connectServer();
