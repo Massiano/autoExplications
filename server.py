@@ -7,6 +7,8 @@ os.makedirs(EXP_DIR, exist_ok=True)
 print(f"[boot] EXP_DIR={os.path.abspath(EXP_DIR)} (env {'set' if 'EXP_DIR' in os.environ else 'NOT SET - ephemeral default'})", flush=True)
 
 app = Flask(__name__)
+import riddles
+riddles.register(app, EXP_DIR)
 runners = {}
 lock = threading.Lock()
 

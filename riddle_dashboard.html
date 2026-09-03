@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>riddle author</title>
+<style>
+body { font-family: monospace; font-size: 13px; margin: 0; background: #f4f2ec; color: #222; }
+#wrap { width: 960px; max-width: 100%; margin: 0 auto; padding: 10px; box-sizing: border-box; }
+h1 { font-size: 16px; margin: 8px 0; }
+h2 { font-size: 14px; margin: 14px 0 6px 0; border-bottom: 1px solid #999; }
+table.formtable td { border: none; padding: 2px 8px 2px 0; white-space: nowrap; }
+input[type=text], select { font-family: monospace; font-size: 13px; }
+textarea { font-family: monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
+.qcbtn { font-family: monospace; font-size: 12px; margin: 0 2px; padding: 2px 6px; cursor: pointer; border: 1px solid #888; background: #eee; }
+.card { border: 1px solid #aaa; background: #fdfcf8; padding: 6px 8px; margin: 8px 0; }
+.card .head { font-weight: bold; cursor: pointer; }
+.st-done { color: #060; } .st-weak { color: #850; } .st-failed { color: #a00; } .st-error { color: #a00; } .st-running { color: #06a; }
+pre.bt { white-space: pre-wrap; background: #faf8f2; border: 1px dashed #ccc; padding: 4px; margin: 3px 0; }
+.chip { display: inline-block; border: 1px solid #aaa; padding: 0 5px; margin: 1px; background: #fff; }
+.chip.bad { background: #f6d4d4; border-color: #b66; }
+.chip.warn { background: #fde8c8; border-color: #b83; }
+.small { color: #666; font-size: 12px; }
+.att { border-top: 1px dotted #bbb; margin-top: 4px; padding-top: 4px; }
+</style>
+</head>
+<body>
+<div id="wrap">
+<h1>riddle author dashboard <span class="small"><a href="/">back to pipeline</a></span></h1>
+
+<h2>new riddle</h2>
+<table class="formtable">
+<tr><td>title</td><td><input type="text" id="f_title" size="34" placeholder="e.g. Finding Nemo"></td>
+    <td>media</td><td><select id="f_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select></td></tr>
+<tr><td>wordlist</td><td><select id="f_wordlist"></select></td>
+    <td>up to lesson</td><td><select id="f_upto"></select></td></tr>
+<tr><td>gen model</td><td><input type="text" id="f_gen" size="34" value="openai/gpt-4o-mini"></td>
+    <td>guess model</td><td><input type="text" id="f_guess" size="26" placeholder="(same)"></td></tr>
+<tr><td>max violations</td><td><input type="text" id="f_viol" size="4" value="0"></td>
+    <td>attempts k</td><td><input type="text" id="f_k" size="4" value="5"></td></tr>
+<tr><td>assess suitability</td><td><input type="checkbox" id="f_assess" checked></td><td></td><td></td></tr>
+</table>
+<div>learner words (extra allowed, comma/newline separated):<br><textarea id="f_learner" style="height:50px" placeholder="fish, ocean, father, lost"></textarea></div>
+<div>extra forbidden words:<br><textarea id="f_forbidden" style="height:34px" placeholder="nemo, dory"></textarea></div>
+<div style="margin:6px 0"><button class="qcbtn" onclick="createRiddle()">generate riddle</button> <span id="f_status" class="small"></span></div>
+
+<h2>riddles</h2>
+<div id="cards"></div>
+</div>
+<script>
+function splitWords(s){ return s.split(/[,\n]/).map(function(w){return w.trim();}).filter(function(w){return w;}); }
+function esc(s){ var d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; }
+
+function loadWordlists(){
+  fetch("/api/wordlists").then(function(r){return r.json();}).then(function(wl){
+    var sel=document.getElementById("f_wordlist"); sel.innerHTML="";
+    Object.keys(wl).forEach(function(n){ var o=document.createElement("option"); o.textContent=n; sel.appendChild(o); });
+    sel.onchange=loadLessons; loadLessons();
+  });
+}
+function loadLessons(){
+  var wl=document.getElementById("f_wordlist").value; if(!wl) return;
+  fetch("/api/riddle_lessons/"+wl).then(function(r){return r.json();}).then(function(ls){
+    var sel=document.getElementById("f_upto"); sel.innerHTML="";
+    ls.forEach(function(k){ var o=document.createElement("option"); o.textContent=k; sel.appendChild(o); });
+    sel.value=ls[ls.length-1];
+  });
+}
+
+function createRiddle(){
+  var body={ title:document.getElementById("f_title").value, media_type:document.getElementById("f_media").value,
+    wordlist:document.getElementById("f_wordlist").value, upto_lesson:document.getElementById("f_upto").value,
+    gen_model:document.getElementById("f_gen").value, guess_model:document.getElementById("f_guess").value,
+    max_violations:document.getElementById("f_viol").value, k_attempts:document.getElementById("f_k").value,
+    assess:document.getElementById("f_assess").checked,
+    learner_words:splitWords(document.getElementById("f_learner").value),
+    extra_forbidden:splitWords(document.getElementById("f_forbidden").value) };
+  document.getElementById("f_status").textContent="starting...";
+  fetch("/api/riddles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    .then(function(r){return r.json();}).then(function(d){
+      document.getElementById("f_status").textContent=d.error?("error: "+d.error):("started "+d.id);
+      refresh();
+    });
+}
+
+var open={};
+function refresh(){
+  fetch("/api/riddles").then(function(r){return r.json();}).then(function(list){
+    var c=document.getElementById("cards"); c.innerHTML="";
+    list.forEach(function(r){
+      var div=document.createElement("div"); div.className="card";
+      var suit=r.suitability?(" suit:"+r.suitability):"";
+      div.innerHTML='<div class="head">'+esc(r.title)+' <span class="small">('+esc(r.media_type)+', vocab '+(r.vocab_size||"?")+suit+')</span> <span class="st-'+esc(r.status)+'">'+esc(r.status)+(r.guessed?" / guessed":"")+'</span></div><div class="body" style="display:none"></div>';
+      div.querySelector(".head").onclick=function(){ open[r.id]=!open[r.id]; renderBody(r.id, div); };
+      if(open[r.id]) renderBody(r.id, div);
+      c.appendChild(div);
+    });
+  });
+}
+function renderBody(rid, div){
+  var b=div.querySelector(".body");
+  if(!open[rid]){ b.style.display="none"; return; }
+  b.style.display="block"; b.innerHTML="loading...";
+  fetch("/api/riddles/"+rid).then(function(r){return r.json();}).then(function(r){
+    var h="";
+    if(r.suitability){ var s=r.suitability;
+      h+='<div class="small">suitability: verdict '+esc(s.verdict)+', popularity '+esc(s.popularity)+', retellability '+esc(s.retellability)+', content '+(s.content_ok===false?'<span class="chip bad">flagged: '+esc(s.content_note)+'</span>':'ok')+' &mdash; '+esc(s.retell_note||"")+'</div>'; }
+    h+='<div class="small">forbidden ('+r.forbidden.length+'): '+r.forbidden.map(function(w){return '<span class="chip">'+esc(w)+'</span>';}).join("")+'</div>';
+    if(r.best){ h+='<h2>best riddle '+(r.best.guessed?'(recalled: "'+esc(r.best.guess)+'")':'(not recalled)')+'</h2><pre class="bt">'+esc(r.best.text)+'</pre>'; }
+    h+='<h2>attempts</h2>';
+    (r.attempts||[]).forEach(function(a,i){
+      h+='<div class="att"><b>#'+(i+1)+'</b> '+(a.valid?'valid':'invalid');
+      if(a.guess!==undefined) h+=' &middot; guess: "'+esc(a.guess)+'" '+(a.guessed?'HIT':'miss');
+      h+='<pre class="bt">'+esc(a.text)+'</pre>';
+      if(a.violations.length) h+='outside vocab: '+a.violations.map(function(w){return '<span class="chip warn">'+esc(w)+'</span>';}).join("")+"<br>";
+      if(a.forbidden_hits.length) h+='forbidden used: '+a.forbidden_hits.map(function(w){return '<span class="chip bad">'+esc(w)+'</span>';}).join("");
+      h+='</div>';
+    });
+    h+='<pre class="bt">'+esc((r.log||[]).join("\n"))+'</pre>';
+    h+='<button class="qcbtn" onclick="delRiddle(\''+rid+'\')">delete</button>';
+    b.innerHTML=h;
+  });
+}
+function delRiddle(rid){ fetch("/api/riddles/"+rid+"/delete",{method:"POST"}).then(refresh); }
+loadWordlists(); refresh(); setInterval(refresh, 5000);
+</script>
+</body>
+</html>
