@@ -252,6 +252,26 @@ def register(app, exp_dir):
         threading.Thread(target=run_steps, args=(rid, steps), daemon=True).start()
         return jsonify({"running": steps})
 
+    @app.route("/api/riddles/try", methods=["POST"])
+    def rtry():
+        body = request.get_json(force=True)
+        step = body.get("step")
+        if step not in STEPS and step != "discover": return jsonify({"error": "bad step"}), 400
+        s = settings()
+        cfg = {**s, **{k: v for k, v in body.get("config", {}).items() if v not in ("", None)}, "prompts": {**s["prompts"], **body.get("config", {}).get("prompts", {})}}
+        t0 = time.time()
+        try:
+            if step == "discover":
+                prompt = cfg["prompts"]["discover_prompt"].format(n=int(body.get("n", 8)), media_type=body.get("media_type", "movie"), criteria=body.get("criteria", ""))
+                return jsonify({"raw": llm(0.8, cfg)(prompt, cfg["gen_model"]), "seconds": round(time.time() - t0, 1)})
+            r = {"id": "_try", "title": body.get("title", "Finding Nemo"), "media_type": body.get("media_type", "movie"), "status": "draft", "text": body.get("text", ""), "config": body.get("config", {}), "learner_words": body.get("learner_words", []), "extra_forbidden": [], "forbidden": body.get("forbidden", []), "attempts": [], "log": [], "suitability": None, "validation": None, "recall": None}
+            if step in ("generate", "validate", "recall") and not r["forbidden"] and step != "validate": step_forbidden(r)
+            if step == "recall" and not r["text"]: step_generate(r)
+            STEPS[step](r)
+            return jsonify({k: r.get(k) for k in ("text", "forbidden", "suitability", "validation", "recall", "attempts", "log", "vocab_size")} | {"seconds": round(time.time() - t0, 1)})
+        except Exception as e:
+            return jsonify({"error": str(e), "seconds": round(time.time() - t0, 1)}), 502
+
     @app.route("/api/riddles/discover", methods=["POST"])
     def rdiscover():
         body = request.get_json(force=True)

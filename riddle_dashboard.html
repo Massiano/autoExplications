@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Riddles</title>
+<title>Riddle Pipeline</title>
 <style>
 * { box-sizing: border-box; }
 body { margin: 0; background: #f6f5f1; color: #1c1b18; font: 14px/1.45 system-ui, sans-serif; }
-#wrap { width: 740px; max-width: 100%; margin: 0 auto; padding: 18px 14px 80px; }
+#wrap { width: 780px; max-width: 100%; margin: 0 auto; padding: 18px 14px 80px; }
 h1 { font-size: 19px; margin: 0; font-weight: 650; }
 button { font: inherit; cursor: pointer; border: 1px solid #d8d4c8; background: #fff; border-radius: 7px; padding: 5px 11px; color: #1c1b18; }
 button:hover { border-color: #a9a493; }
@@ -17,11 +17,32 @@ button:disabled { opacity: .45; cursor: default; }
 input[type=text], select, textarea { font: inherit; border: 1px solid #d8d4c8; border-radius: 7px; padding: 6px 9px; background: #fff; color: inherit; }
 input[type=text]:focus, textarea:focus { outline: none; border-color: #8a8474; }
 textarea { width: 100%; resize: vertical; }
-#topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+#topbar { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.tab { font-size: 15px; padding: 4px 2px; cursor: pointer; color: #8b8574; border-bottom: 2px solid transparent; }
+.tab.on { color: #1c1b18; border-color: #1c1b18; font-weight: 600; }
+.view { display: none; }
+.view.on { display: block; }
+.small { font-size: 12px; color: #8b8574; }
+.ok { color: #3f8f5a; font-weight: 600; }
+.err { color: #b04a3a; }
+/* design view */
+.step { background: #fff; border: 1px solid #e6e2d6; border-radius: 10px; margin: 0 0 4px; padding: 12px 14px; position: relative; }
+.step::after { content: ""; position: absolute; left: 26px; bottom: -13px; height: 13px; border-left: 2px solid #d8d4c8; z-index: 1; }
+.step:last-of-type::after { display: none; }
+.step h2 { font-size: 14.5px; margin: 0 0 2px; display: flex; align-items: baseline; gap: 10px; }
+.step h2 .small { font-weight: 400; }
+.step textarea { font: 12.5px/1.5 ui-monospace, monospace; min-height: 64px; margin-top: 6px; }
+.prow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; font-size: 13px; color: #77716b; }
+.prow input[type=text], .prow select { padding: 3px 7px; font-size: 13px; }
+.tryout { font: 12.5px/1.5 ui-monospace, monospace; white-space: pre-wrap; background: #f3f1ea; border-radius: 7px; padding: 8px; margin-top: 8px; max-height: 260px; overflow: auto; }
+.tryout:empty { display: none; }
+#scratch { background: #efece2; border: 1px dashed #c9c4b4; border-radius: 10px; padding: 10px 14px; margin-bottom: 14px; display: flex; gap: 8px; align-items: center; }
+#savebar { position: sticky; bottom: 12px; margin-top: 14px; display: flex; gap: 10px; align-items: center; }
+/* catalog */
 #pills { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
 .pill { border: 1px solid #ddd9cd; border-radius: 20px; padding: 2px 11px; font-size: 12.5px; cursor: pointer; background: #fff; color: #777161; }
 .pill.on { background: #2a2a26; color: #fff; border-color: #2a2a26; }
-#addrow { display: flex; gap: 8px; margin-bottom: 18px; }
+#addrow { display: flex; gap: 8px; margin-bottom: 6px; }
 #addrow input[type=text]:first-child { flex: 1; }
 .frow2 { display: flex; }
 .card { background: #fff; border: 1px solid #e6e2d6; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
@@ -40,7 +61,6 @@ textarea { width: 100%; resize: vertical; }
 .vw { display: inline-block; margin: 1px 3px 1px 0; padding: 0 6px; border-radius: 5px; }
 .vw.out { background: #fbeecb; border: 1px solid #e2c477; }
 .vw.fb { background: #f8dcdc; border: 1px solid #d99; }
-.ok { color: #3f8f5a; font-weight: 600; }
 .actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
 .frow { display: flex; gap: 8px; margin: 6px 0; align-items: flex-start; }
 .frow label { width: 118px; flex: none; padding-top: 7px; font-size: 12.5px; color: #77716b; }
@@ -50,27 +70,35 @@ summary { cursor: pointer; color: #77716b; font-size: 13px; }
 pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; background: #f3f1ea; border-radius: 7px; padding: 8px; max-height: 220px; overflow: auto; margin: 6px 0 0; }
 .att { border-top: 1px dashed #ded9cb; padding: 7px 0; font-size: 13px; }
 .att pre { font: 12.5px/1.5 ui-monospace, monospace; white-space: pre-wrap; margin: 4px 0; }
-#panel { position: fixed; top: 0; right: -420px; width: 400px; max-width: 94vw; height: 100%; background: #fff; border-left: 1px solid #e0dccf; padding: 16px; overflow-y: auto; transition: right .2s; z-index: 20; }
-#panel.on { right: 0; }
-#panel h2 { font-size: 15px; margin: 14px 0 6px; }
-#panel textarea { font: 12px/1.45 ui-monospace, monospace; }
 #batchbar { position: fixed; bottom: 0; left: 0; right: 0; background: #2a2a26; color: #fff; padding: 9px 16px; display: none; gap: 8px; align-items: center; z-index: 15; }
 #batchbar.on { display: flex; }
 #batchbar button { background: #43423c; border-color: #43423c; color: #fff; }
 .cb { flex: none; }
-.small { font-size: 12px; color: #8b8574; }
 </style>
 </head>
 <body>
 <div id="wrap">
-<div id="topbar"><h1>Riddles</h1><span class="small" id="counts"></span><span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">pipeline</button><button onclick="togglePanel()">settings</button></div>
+<div id="topbar"><h1>Riddles</h1>
+<span class="tab" data-v="design" onclick="showView('design')">Pipeline design</span>
+<span class="tab" data-v="catalog" onclick="showView('catalog')">Catalog <span class="small" id="counts"></span></span>
+<span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">explication pipeline</button></div>
+
+<div class="view" id="v-design">
+<div id="scratch">try steps against: <input type="text" id="t_title" value="Finding Nemo" style="width:200px">
+<select id="t_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
+<span class="small">nothing here is saved to the catalog</span></div>
+<div id="steps"></div>
+<div id="savebar"><button class="pri" onclick="saveSettings()">save pipeline</button><span class="small" id="s_status"></span></div>
+</div>
+
+<div class="view" id="v-catalog">
 <div id="addrow">
 <input type="text" id="d_criteria" placeholder="criteria, e.g. animated classics of the 90s (optional)" onkeydown="if(event.key==='Enter')discover()">
 <select id="a_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
 <input type="text" id="d_n" value="15" style="width:52px" title="how many">
 <button class="pri" onclick="discover()">discover + assess</button>
 </div>
-<div class="small" style="margin:-12px 0 16px 2px"><label><input type="checkbox" id="d_rej" checked> auto-reject poor/flagged</label>
+<div class="small" style="margin:0 0 16px 2px"><label><input type="checkbox" id="d_rej" checked> auto-reject poor/flagged</label>
 &nbsp; <a href="#" onclick="var r=document.getElementById('singlerow');r.style.display=r.style.display==='none'?'flex':'none';return false">add single title</a>
 <span id="d_status"></span></div>
 <div id="singlerow" style="display:none;gap:8px;margin:-8px 0 16px" class="frow2">
@@ -81,6 +109,7 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <div id="pills"></div>
 <div id="cards"></div>
 </div>
+</div>
 
 <div id="batchbar"><span id="bcount"></span>
 <button onclick="batch(['assess'])">assess</button>
@@ -90,64 +119,91 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <span style="margin-left:auto"></span><button onclick="sel={};render()">clear</button>
 </div>
 
-<div id="panel">
-<div style="display:flex;align-items:center"><h1 style="font-size:16px">Settings</h1><button class="ghost" style="margin-left:auto" onclick="togglePanel()">close</button></div>
-<h2>vocabulary</h2>
-<div class="frow"><label>wordlist</label><select id="s_wordlist" onchange="fillLessons()"></select></div>
-<div class="frow"><label>up to lesson</label><select id="s_upto"></select></div>
-<div class="frow"><label>upload list</label><div><input type="text" id="u_name" placeholder="name" style="width:120px"> <input type="file" id="u_file" style="font-size:12px"><div class="small">json (ltwf format or array) or plain words, comma/newline</div></div></div>
-<h2>generation</h2>
-<div class="frow"><label>gen model</label><input type="text" id="s_gen"></div>
-<div class="frow"><label>guess model</label><input type="text" id="s_guess" placeholder="(same as gen)"></div>
-<div class="frow"><label>judge model</label><input type="text" id="s_judge" placeholder="(same as gen)"></div>
-<div class="frow"><label>attempts k</label><input type="text" id="s_k" style="width:70px"></div>
-<div class="frow"><label>max violations</label><input type="text" id="s_viol" style="width:70px"></div>
-<h2>prompts</h2>
-<div id="s_prompts"></div>
-<div style="margin:14px 0"><button class="pri" onclick="saveSettings()">save settings</button> <span class="small" id="s_status"></span></div>
-</div>
-
 <script>
 var S=null, WL={}, sel={}, filt=null, openId=null, listCache="", riddleCache={};
 function esc(s){var d=document.createElement("div");d.textContent=s==null?"":s;return d.innerHTML;}
 function j(u,body){return fetch(u,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:undefined).then(function(r){return r.json();});}
+function showView(v){document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("on",t.dataset.v===v);});
+  document.getElementById("v-design").classList.toggle("on",v==="design");document.getElementById("v-catalog").classList.toggle("on",v==="catalog");}
 
-function loadSettings(){
-  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists")]).then(function(a){
-    S=a[0];WL=a[1];
-    var ws=document.getElementById("s_wordlist");ws.innerHTML="";
-    Object.keys(WL).forEach(function(n){var o=document.createElement("option");o.textContent=n;ws.appendChild(o);});
-    ws.value=S.wordlist in WL?S.wordlist:Object.keys(WL)[0];
-    fillLessons(S.upto_lesson);
-    document.getElementById("s_gen").value=S.gen_model;document.getElementById("s_guess").value=S.guess_model;document.getElementById("s_judge").value=S.judge_model;
-    document.getElementById("s_k").value=S.k_attempts;document.getElementById("s_viol").value=S.max_violations;
-    var pd=document.getElementById("s_prompts");pd.innerHTML="";
-    Object.keys(S.prompts).forEach(function(k){
-      pd.insertAdjacentHTML("beforeend",'<div class="small" style="margin-top:8px">'+esc(k)+'</div><textarea data-pk="'+esc(k)+'" style="height:74px">'+esc(S.prompts[k])+'</textarea>');
-    });
+var STEPDEFS=[
+ {id:"discover",name:"1 · Discover",desc:"generate candidate titles from criteria",pk:"discover_prompt",params:"gen"},
+ {id:"assess",name:"2 · Assess",desc:"suitability: popularity, content, retellability; poor/flagged can auto-reject",pk:"suitability_prompt",params:"judge"},
+ {id:"forbidden",name:"3 · Forbidden terms",desc:"extract giveaway words (title, names, invented terms)",pk:"forbidden_prompt",params:"gen"},
+ {id:"generate",name:"4 · Generate riddle",desc:"retell within the allowed vocabulary, k attempts, best kept",pk:"retell_prompt",params:"gen vocab kviol"},
+ {id:"validate",name:"5 · Validate",desc:"deterministic: every word in vocab, no forbidden word — no LLM",pk:null,params:"vocab viol"},
+ {id:"recall",name:"6 · Recall test",desc:"a cold model must guess the title back; judge settles near-misses",pk:"recall_prompt",params:"guess judge",pk2:"recall_judge_prompt"},
+];
+
+function modelInput(id,val,ph){return '<label>model <input type="text" data-f="'+id+'" value="'+esc(val)+'" placeholder="'+(ph||"")+'" style="width:210px"></label>';}
+function buildDesign(){
+  var d=document.getElementById("steps");d.innerHTML="";
+  STEPDEFS.forEach(function(sd){
+    var h='<div class="step"><h2>'+sd.name+' <span class="small">'+sd.desc+'</span><span style="margin-left:auto"></span>'+
+      '<button data-try="'+sd.id+'">try</button></h2>';
+    var pr='<div class="prow">';
+    if(sd.params.indexOf("gen")>=0)pr+=modelInput("gen_model",S.gen_model);
+    if(sd.params.indexOf("guess")>=0)pr+=modelInput("guess_model",S.guess_model,"(gen model)");
+    if(sd.params.indexOf("judge")>=0)pr+=modelInput("judge_model",S.judge_model,"(gen model)");
+    if(sd.params.indexOf("vocab")>=0)pr+='<label>wordlist <select data-f="wordlist" onchange="fillLessons()"></select></label><label>up to <select data-f="upto_lesson"></select></label><label class="small">upload <input type="file" id="u_file" style="font-size:11px;width:170px"></label>';
+    if(sd.params.indexOf("kviol")>=0)pr+='<label>attempts k <input type="text" data-f="k_attempts" value="'+esc(S.k_attempts)+'" style="width:46px"></label>';
+    if(sd.params.indexOf("viol")>=0)pr+='<label>max violations <input type="text" data-f="max_violations" value="'+esc(S.max_violations)+'" style="width:46px"></label>';
+    pr+='</div>';
+    h+=pr;
+    if(sd.pk)h+='<textarea data-pk="'+sd.pk+'">'+esc(S.prompts[sd.pk])+'</textarea>';
+    if(sd.pk2)h+='<textarea data-pk="'+sd.pk2+'" style="min-height:40px">'+esc(S.prompts[sd.pk2])+'</textarea>';
+    h+='<div class="tryout" data-out="'+sd.id+'"></div></div>';
+    d.insertAdjacentHTML("beforeend",h);
   });
+  var ws=d.querySelector('[data-f="wordlist"]');
+  if(ws){Object.keys(WL).forEach(function(n){var o=document.createElement("option");o.textContent=n;ws.appendChild(o);});
+    ws.value=S.wordlist in WL?S.wordlist:Object.keys(WL)[0];fillLessons(S.upto_lesson);
+    document.getElementById("u_file").onchange=uploadList;}
+  d.querySelectorAll("[data-try]").forEach(function(b){b.onclick=function(){tryStep(b.dataset.try);};});
 }
 function fillLessons(want){
-  var wl=document.getElementById("s_wordlist").value, ls=WL[wl]||[], sel2=document.getElementById("s_upto");
+  var d=document.getElementById("steps"), wl=d.querySelector('[data-f="wordlist"]').value, ls=WL[wl]||[], sel2=d.querySelector('[data-f="upto_lesson"]');
   sel2.innerHTML="";ls.forEach(function(k){var o=document.createElement("option");o.textContent=k;sel2.appendChild(o);});
   sel2.value=(want&&ls.indexOf(want)>=0)?want:ls[ls.length-1]||"";
 }
-function saveSettings(){
-  var p={};document.querySelectorAll("#s_prompts textarea").forEach(function(t){p[t.dataset.pk]=t.value;});
-  var body={wordlist:document.getElementById("s_wordlist").value,upto_lesson:document.getElementById("s_upto").value,
-    gen_model:document.getElementById("s_gen").value,guess_model:document.getElementById("s_guess").value,judge_model:document.getElementById("s_judge").value,
-    k_attempts:+document.getElementById("s_k").value||3,max_violations:+document.getElementById("s_viol").value||0,prompts:p};
-  j("/api/riddle_settings",body).then(function(s){S=s;document.getElementById("s_status").textContent="saved";setTimeout(function(){document.getElementById("s_status").textContent="";},1500);});
+function collectConfig(){
+  var cfg={prompts:{}};
+  document.querySelectorAll("#steps [data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
+  document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
+  cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
+  return cfg;
 }
-document.getElementById("u_file").onchange=function(){
+function saveSettings(){
+  j("/api/riddle_settings",collectConfig()).then(function(s){S=s;
+    document.getElementById("s_status").textContent="saved";setTimeout(function(){document.getElementById("s_status").textContent="";},1500);});
+}
+function tryStep(step){
+  var out=document.querySelector('[data-out="'+step+'"]');out.textContent="running…";
+  var body={step:step,title:document.getElementById("t_title").value,media_type:document.getElementById("t_media").value,config:collectConfig()};
+  if(step==="discover"){body.criteria=document.getElementById("d_criteria")?document.getElementById("d_criteria").value:"";body.n=8;}
+  j("/api/riddles/try",body).then(function(r){
+    if(r.error){out.innerHTML='<span class="err">'+esc(r.error)+'</span>';return;}
+    var h=r.seconds+"s\n";
+    if(r.raw)h+=esc(r.raw);
+    if(r.suitability)h+=esc(JSON.stringify(r.suitability,null,1));
+    if(r.forbidden&&r.forbidden.length&&step==="forbidden")h+=esc(r.forbidden.join(", "));
+    if(r.text&&(step==="generate"||step==="recall"))h+=esc(r.text)+"\n";
+    if(r.validation&&step!=="assess")h+="\nvalidation: "+(r.validation.valid?"valid":"outside ["+esc(r.validation.outside.join(", "))+"] forbidden ["+esc(r.validation.forbidden_hits.join(", "))+"]")+" (vocab "+r.vocab_size+")";
+    if(r.recall)h+="\nrecall: \u201c"+esc(r.recall.guess)+"\u201d "+(r.recall.hit?"HIT":"miss");
+    out.innerHTML=h;
+  });
+}
+function uploadList(){
   var f=this.files[0];if(!f)return;
-  var name=document.getElementById("u_name").value||f.name.replace(/\.\w+$/,"");
   var rd=new FileReader();
-  rd.onload=function(){j("/api/riddle_wordlists",{name:name,content:rd.result}).then(function(){loadSettings();});};
+  rd.onload=function(){j("/api/riddle_wordlists",{name:f.name.replace(/\.\w+$/,""),content:rd.result}).then(function(){
+    j("/api/riddle_wordlists").then(function(w){WL=w;buildDesign();});});};
   rd.readAsText(f);
-};
-function togglePanel(){document.getElementById("panel").classList.toggle("on");}
+}
 
+function loadAll(){
+  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists")]).then(function(a){S=a[0];WL=a[1];buildDesign();});
+}
 function discover(){
   var st=document.getElementById("d_status");st.textContent=" · generating list…";
   j("/api/riddles/discover",{criteria:document.getElementById("d_criteria").value,media_type:document.getElementById("a_media").value,
@@ -170,12 +226,12 @@ function pollAll(){
 function addRiddle(auto){
   var t=document.getElementById("a_title").value.trim();if(!t)return;
   j("/api/riddles",{title:t,media_type:document.getElementById("a_media").value,steps:auto?["assess","generate","recall"]:[]}).then(function(){
-    document.getElementById("a_title").value="";refresh(true);
+    document.getElementById("a_title").value="";refresh(true);pollAll();
   });
 }
 function batch(steps){
   var ids=Object.keys(sel).filter(function(k){return sel[k];});if(!ids.length)return;
-  j("/api/riddles/batch",{ids:ids,steps:steps}).then(function(){sel={};refresh(true);});
+  j("/api/riddles/batch",{ids:ids,steps:steps}).then(function(){sel={};refresh(true);pollAll();});
 }
 
 var STATUSES=["draft","generated","valid","tested","published","rejected"];
@@ -189,11 +245,10 @@ var lastList=[];
 function render(list){
   if(list)lastList=list;list=lastList;
   var counts={};list.forEach(function(r){counts[r.status]=(counts[r.status]||0)+1;});
-  document.getElementById("counts").textContent=list.length+" riddles";
-  var ph=STATUSES.filter(function(s){return counts[s];}).map(function(s){
+  document.getElementById("counts").textContent="("+list.length+")";
+  document.getElementById("pills").innerHTML=STATUSES.filter(function(s){return counts[s];}).map(function(s){
     return '<span class="pill'+(filt===s?" on":"")+'" onclick="filt=filt===\''+s+'\'?null:\''+s+'\';render()">'+s+' '+counts[s]+'</span>';
   }).join("");
-  document.getElementById("pills").innerHTML=ph;
   var c=document.getElementById("cards");
   var shown=list.filter(function(r){return !filt||r.status===filt;});
   var wantIds=shown.map(function(r){return r.id;});
@@ -277,8 +332,10 @@ function poll(rid){
     });
   },1800);
 }
-setInterval(function(){refresh(false);},4000);
-loadSettings();refresh(true);
+setInterval(function(){var v=document.getElementById("v-catalog");if(v.classList.contains("on"))refresh(false);},4000);
+loadAll();refresh(true);
+showView(localStorage.getItem("riddle_view")||"design");
+document.querySelectorAll(".tab").forEach(function(t){t.addEventListener("click",function(){localStorage.setItem("riddle_view",t.dataset.v);});});
 </script>
 </body>
 </html>
