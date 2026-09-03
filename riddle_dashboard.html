@@ -3,126 +3,254 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>riddle author</title>
+<title>Riddles</title>
 <style>
-body { font-family: monospace; font-size: 13px; margin: 0; background: #f4f2ec; color: #222; }
-#wrap { width: 960px; max-width: 100%; margin: 0 auto; padding: 10px; box-sizing: border-box; }
-h1 { font-size: 16px; margin: 8px 0; }
-h2 { font-size: 14px; margin: 14px 0 6px 0; border-bottom: 1px solid #999; }
-table.formtable td { border: none; padding: 2px 8px 2px 0; white-space: nowrap; }
-input[type=text], select { font-family: monospace; font-size: 13px; }
-textarea { font-family: monospace; font-size: 12px; width: 100%; box-sizing: border-box; }
-.qcbtn { font-family: monospace; font-size: 12px; margin: 0 2px; padding: 2px 6px; cursor: pointer; border: 1px solid #888; background: #eee; }
-.card { border: 1px solid #aaa; background: #fdfcf8; padding: 6px 8px; margin: 8px 0; }
-.card .head { font-weight: bold; cursor: pointer; }
-.st-done { color: #060; } .st-weak { color: #850; } .st-failed { color: #a00; } .st-error { color: #a00; } .st-running { color: #06a; }
-pre.bt { white-space: pre-wrap; background: #faf8f2; border: 1px dashed #ccc; padding: 4px; margin: 3px 0; }
-.chip { display: inline-block; border: 1px solid #aaa; padding: 0 5px; margin: 1px; background: #fff; }
-.chip.bad { background: #f6d4d4; border-color: #b66; }
-.chip.warn { background: #fde8c8; border-color: #b83; }
-.small { color: #666; font-size: 12px; }
-.att { border-top: 1px dotted #bbb; margin-top: 4px; padding-top: 4px; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f5f1; color: #1c1b18; font: 14px/1.45 system-ui, sans-serif; }
+#wrap { width: 740px; max-width: 100%; margin: 0 auto; padding: 18px 14px 80px; }
+h1 { font-size: 19px; margin: 0; font-weight: 650; }
+button { font: inherit; cursor: pointer; border: 1px solid #d8d4c8; background: #fff; border-radius: 7px; padding: 5px 11px; color: #1c1b18; }
+button:hover { border-color: #a9a493; }
+button.pri { background: #2a2a26; color: #fff; border-color: #2a2a26; }
+button.ghost { border-color: transparent; background: transparent; color: #777161; }
+button:disabled { opacity: .45; cursor: default; }
+input[type=text], select, textarea { font: inherit; border: 1px solid #d8d4c8; border-radius: 7px; padding: 6px 9px; background: #fff; color: inherit; }
+input[type=text]:focus, textarea:focus { outline: none; border-color: #8a8474; }
+textarea { width: 100%; resize: vertical; }
+#topbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+#pills { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; }
+.pill { border: 1px solid #ddd9cd; border-radius: 20px; padding: 2px 11px; font-size: 12.5px; cursor: pointer; background: #fff; color: #777161; }
+.pill.on { background: #2a2a26; color: #fff; border-color: #2a2a26; }
+#addrow { display: flex; gap: 8px; margin-bottom: 18px; }
+#addrow input { flex: 1; }
+.card { background: #fff; border: 1px solid #e6e2d6; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
+.chead { display: flex; align-items: center; gap: 9px; padding: 10px 12px; cursor: pointer; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.s-draft { background: #c9c4b4; } .s-generated { background: #e0b25c; } .s-valid { background: #7fb069; } .s-tested { background: #3f8f5a; } .s-published { background: #2d6cc0; } .s-rejected { background: #c05555; }
+.spoil { font-weight: 600; filter: blur(5px); transition: filter .15s; }
+.spoil.show { filter: none; }
+.meta { font-size: 12px; color: #8b8574; margin-left: auto; white-space: nowrap; display: flex; gap: 8px; align-items: center; }
+.busy { color: #b07f2a; }
+.preview { padding: 0 12px 10px 30px; color: #565247; font: 13px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+.preview:empty { display: none; }
+.bench { border-top: 1px solid #eee9dd; padding: 12px; background: #fcfbf7; }
+.bench textarea { font: 13.5px/1.55 ui-monospace, monospace; min-height: 90px; }
+.vwords { margin: 6px 0 10px; font-size: 12.5px; }
+.vw { display: inline-block; margin: 1px 3px 1px 0; padding: 0 6px; border-radius: 5px; }
+.vw.out { background: #fbeecb; border: 1px solid #e2c477; }
+.vw.fb { background: #f8dcdc; border: 1px solid #d99; }
+.ok { color: #3f8f5a; font-weight: 600; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+.frow { display: flex; gap: 8px; margin: 6px 0; align-items: flex-start; }
+.frow label { width: 118px; flex: none; padding-top: 7px; font-size: 12.5px; color: #77716b; }
+.frow > *:not(label) { flex: 1; }
+details { margin-top: 10px; }
+summary { cursor: pointer; color: #77716b; font-size: 13px; }
+pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; background: #f3f1ea; border-radius: 7px; padding: 8px; max-height: 220px; overflow: auto; margin: 6px 0 0; }
+.att { border-top: 1px dashed #ded9cb; padding: 7px 0; font-size: 13px; }
+.att pre { font: 12.5px/1.5 ui-monospace, monospace; white-space: pre-wrap; margin: 4px 0; }
+#panel { position: fixed; top: 0; right: -420px; width: 400px; max-width: 94vw; height: 100%; background: #fff; border-left: 1px solid #e0dccf; padding: 16px; overflow-y: auto; transition: right .2s; z-index: 20; }
+#panel.on { right: 0; }
+#panel h2 { font-size: 15px; margin: 14px 0 6px; }
+#panel textarea { font: 12px/1.45 ui-monospace, monospace; }
+#batchbar { position: fixed; bottom: 0; left: 0; right: 0; background: #2a2a26; color: #fff; padding: 9px 16px; display: none; gap: 8px; align-items: center; z-index: 15; }
+#batchbar.on { display: flex; }
+#batchbar button { background: #43423c; border-color: #43423c; color: #fff; }
+.cb { flex: none; }
+.small { font-size: 12px; color: #8b8574; }
 </style>
 </head>
 <body>
 <div id="wrap">
-<h1>riddle author dashboard <span class="small"><a href="/">back to pipeline</a></span></h1>
-
-<h2>new riddle</h2>
-<table class="formtable">
-<tr><td>title</td><td><input type="text" id="f_title" size="34" placeholder="e.g. Finding Nemo"></td>
-    <td>media</td><td><select id="f_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select></td></tr>
-<tr><td>wordlist</td><td><select id="f_wordlist"></select></td>
-    <td>up to lesson</td><td><select id="f_upto"></select></td></tr>
-<tr><td>gen model</td><td><input type="text" id="f_gen" size="34" value="openai/gpt-4o-mini"></td>
-    <td>guess model</td><td><input type="text" id="f_guess" size="26" placeholder="(same)"></td></tr>
-<tr><td>max violations</td><td><input type="text" id="f_viol" size="4" value="0"></td>
-    <td>attempts k</td><td><input type="text" id="f_k" size="4" value="5"></td></tr>
-<tr><td>assess suitability</td><td><input type="checkbox" id="f_assess" checked></td><td></td><td></td></tr>
-</table>
-<div>learner words (extra allowed, comma/newline separated):<br><textarea id="f_learner" style="height:50px" placeholder="fish, ocean, father, lost"></textarea></div>
-<div>extra forbidden words:<br><textarea id="f_forbidden" style="height:34px" placeholder="nemo, dory"></textarea></div>
-<div style="margin:6px 0"><button class="qcbtn" onclick="createRiddle()">generate riddle</button> <span id="f_status" class="small"></span></div>
-
-<h2>riddles</h2>
+<div id="topbar"><h1>Riddles</h1><span class="small" id="counts"></span><span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">pipeline</button><button onclick="togglePanel()">settings</button></div>
+<div id="addrow">
+<input type="text" id="a_title" placeholder="Title, e.g. Finding Nemo" onkeydown="if(event.key==='Enter')addRiddle(true)">
+<select id="a_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
+<button onclick="addRiddle(false)">add draft</button>
+<button class="pri" onclick="addRiddle(true)">add + auto-run</button>
+</div>
+<div id="pills"></div>
 <div id="cards"></div>
 </div>
+
+<div id="batchbar"><span id="bcount"></span>
+<button onclick="batch(['assess'])">assess</button>
+<button onclick="batch(['generate','recall'])">generate+recall</button>
+<button onclick="batch(['validate'])">revalidate</button>
+<button onclick="batch(['recall'])">recall</button>
+<span style="margin-left:auto"></span><button onclick="sel={};render()">clear</button>
+</div>
+
+<div id="panel">
+<div style="display:flex;align-items:center"><h1 style="font-size:16px">Settings</h1><button class="ghost" style="margin-left:auto" onclick="togglePanel()">close</button></div>
+<h2>vocabulary</h2>
+<div class="frow"><label>wordlist</label><select id="s_wordlist" onchange="fillLessons()"></select></div>
+<div class="frow"><label>up to lesson</label><select id="s_upto"></select></div>
+<div class="frow"><label>upload list</label><div><input type="text" id="u_name" placeholder="name" style="width:120px"> <input type="file" id="u_file" style="font-size:12px"><div class="small">json (ltwf format or array) or plain words, comma/newline</div></div></div>
+<h2>generation</h2>
+<div class="frow"><label>gen model</label><input type="text" id="s_gen"></div>
+<div class="frow"><label>guess model</label><input type="text" id="s_guess" placeholder="(same as gen)"></div>
+<div class="frow"><label>judge model</label><input type="text" id="s_judge" placeholder="(same as gen)"></div>
+<div class="frow"><label>attempts k</label><input type="text" id="s_k" style="width:70px"></div>
+<div class="frow"><label>max violations</label><input type="text" id="s_viol" style="width:70px"></div>
+<h2>prompts</h2>
+<div id="s_prompts"></div>
+<div style="margin:14px 0"><button class="pri" onclick="saveSettings()">save settings</button> <span class="small" id="s_status"></span></div>
+</div>
+
 <script>
-function splitWords(s){ return s.split(/[,\n]/).map(function(w){return w.trim();}).filter(function(w){return w;}); }
-function esc(s){ var d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; }
+var S=null, WL={}, sel={}, filt=null, openId=null, listCache="", riddleCache={};
+function esc(s){var d=document.createElement("div");d.textContent=s==null?"":s;return d.innerHTML;}
+function j(u,body){return fetch(u,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:undefined).then(function(r){return r.json();});}
 
-function loadWordlists(){
-  fetch("/api/wordlists").then(function(r){return r.json();}).then(function(wl){
-    var sel=document.getElementById("f_wordlist"); sel.innerHTML="";
-    Object.keys(wl).forEach(function(n){ var o=document.createElement("option"); o.textContent=n; sel.appendChild(o); });
-    sel.onchange=loadLessons; loadLessons();
-  });
-}
-function loadLessons(){
-  var wl=document.getElementById("f_wordlist").value; if(!wl) return;
-  fetch("/api/riddle_lessons/"+wl).then(function(r){return r.json();}).then(function(ls){
-    var sel=document.getElementById("f_upto"); sel.innerHTML="";
-    ls.forEach(function(k){ var o=document.createElement("option"); o.textContent=k; sel.appendChild(o); });
-    sel.value=ls[ls.length-1];
-  });
-}
-
-function createRiddle(){
-  var body={ title:document.getElementById("f_title").value, media_type:document.getElementById("f_media").value,
-    wordlist:document.getElementById("f_wordlist").value, upto_lesson:document.getElementById("f_upto").value,
-    gen_model:document.getElementById("f_gen").value, guess_model:document.getElementById("f_guess").value,
-    max_violations:document.getElementById("f_viol").value, k_attempts:document.getElementById("f_k").value,
-    assess:document.getElementById("f_assess").checked,
-    learner_words:splitWords(document.getElementById("f_learner").value),
-    extra_forbidden:splitWords(document.getElementById("f_forbidden").value) };
-  document.getElementById("f_status").textContent="starting...";
-  fetch("/api/riddles",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
-    .then(function(r){return r.json();}).then(function(d){
-      document.getElementById("f_status").textContent=d.error?("error: "+d.error):("started "+d.id);
-      refresh();
-    });
-}
-
-var open={};
-function refresh(){
-  fetch("/api/riddles").then(function(r){return r.json();}).then(function(list){
-    var c=document.getElementById("cards"); c.innerHTML="";
-    list.forEach(function(r){
-      var div=document.createElement("div"); div.className="card";
-      var suit=r.suitability?(" suit:"+r.suitability):"";
-      div.innerHTML='<div class="head">'+esc(r.title)+' <span class="small">('+esc(r.media_type)+', vocab '+(r.vocab_size||"?")+suit+')</span> <span class="st-'+esc(r.status)+'">'+esc(r.status)+(r.guessed?" / guessed":"")+'</span></div><div class="body" style="display:none"></div>';
-      div.querySelector(".head").onclick=function(){ open[r.id]=!open[r.id]; renderBody(r.id, div); };
-      if(open[r.id]) renderBody(r.id, div);
-      c.appendChild(div);
+function loadSettings(){
+  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists")]).then(function(a){
+    S=a[0];WL=a[1];
+    var ws=document.getElementById("s_wordlist");ws.innerHTML="";
+    Object.keys(WL).forEach(function(n){var o=document.createElement("option");o.textContent=n;ws.appendChild(o);});
+    ws.value=S.wordlist in WL?S.wordlist:Object.keys(WL)[0];
+    fillLessons(S.upto_lesson);
+    document.getElementById("s_gen").value=S.gen_model;document.getElementById("s_guess").value=S.guess_model;document.getElementById("s_judge").value=S.judge_model;
+    document.getElementById("s_k").value=S.k_attempts;document.getElementById("s_viol").value=S.max_violations;
+    var pd=document.getElementById("s_prompts");pd.innerHTML="";
+    Object.keys(S.prompts).forEach(function(k){
+      pd.insertAdjacentHTML("beforeend",'<div class="small" style="margin-top:8px">'+esc(k)+'</div><textarea data-pk="'+esc(k)+'" style="height:74px">'+esc(S.prompts[k])+'</textarea>');
     });
   });
 }
-function renderBody(rid, div){
-  var b=div.querySelector(".body");
-  if(!open[rid]){ b.style.display="none"; return; }
-  b.style.display="block"; b.innerHTML="loading...";
-  fetch("/api/riddles/"+rid).then(function(r){return r.json();}).then(function(r){
-    var h="";
-    if(r.suitability){ var s=r.suitability;
-      h+='<div class="small">suitability: verdict '+esc(s.verdict)+', popularity '+esc(s.popularity)+', retellability '+esc(s.retellability)+', content '+(s.content_ok===false?'<span class="chip bad">flagged: '+esc(s.content_note)+'</span>':'ok')+' &mdash; '+esc(s.retell_note||"")+'</div>'; }
-    h+='<div class="small">forbidden ('+r.forbidden.length+'): '+r.forbidden.map(function(w){return '<span class="chip">'+esc(w)+'</span>';}).join("")+'</div>';
-    if(r.best){ h+='<h2>best riddle '+(r.best.guessed?'(recalled: "'+esc(r.best.guess)+'")':'(not recalled)')+'</h2><pre class="bt">'+esc(r.best.text)+'</pre>'; }
-    h+='<h2>attempts</h2>';
-    (r.attempts||[]).forEach(function(a,i){
-      h+='<div class="att"><b>#'+(i+1)+'</b> '+(a.valid?'valid':'invalid');
-      if(a.guess!==undefined) h+=' &middot; guess: "'+esc(a.guess)+'" '+(a.guessed?'HIT':'miss');
-      h+='<pre class="bt">'+esc(a.text)+'</pre>';
-      if(a.violations.length) h+='outside vocab: '+a.violations.map(function(w){return '<span class="chip warn">'+esc(w)+'</span>';}).join("")+"<br>";
-      if(a.forbidden_hits.length) h+='forbidden used: '+a.forbidden_hits.map(function(w){return '<span class="chip bad">'+esc(w)+'</span>';}).join("");
-      h+='</div>';
-    });
-    h+='<pre class="bt">'+esc((r.log||[]).join("\n"))+'</pre>';
-    h+='<button class="qcbtn" onclick="delRiddle(\''+rid+'\')">delete</button>';
-    b.innerHTML=h;
+function fillLessons(want){
+  var wl=document.getElementById("s_wordlist").value, ls=WL[wl]||[], sel2=document.getElementById("s_upto");
+  sel2.innerHTML="";ls.forEach(function(k){var o=document.createElement("option");o.textContent=k;sel2.appendChild(o);});
+  sel2.value=(want&&ls.indexOf(want)>=0)?want:ls[ls.length-1]||"";
+}
+function saveSettings(){
+  var p={};document.querySelectorAll("#s_prompts textarea").forEach(function(t){p[t.dataset.pk]=t.value;});
+  var body={wordlist:document.getElementById("s_wordlist").value,upto_lesson:document.getElementById("s_upto").value,
+    gen_model:document.getElementById("s_gen").value,guess_model:document.getElementById("s_guess").value,judge_model:document.getElementById("s_judge").value,
+    k_attempts:+document.getElementById("s_k").value||3,max_violations:+document.getElementById("s_viol").value||0,prompts:p};
+  j("/api/riddle_settings",body).then(function(s){S=s;document.getElementById("s_status").textContent="saved";setTimeout(function(){document.getElementById("s_status").textContent="";},1500);});
+}
+document.getElementById("u_file").onchange=function(){
+  var f=this.files[0];if(!f)return;
+  var name=document.getElementById("u_name").value||f.name.replace(/\.\w+$/,"");
+  var rd=new FileReader();
+  rd.onload=function(){j("/api/riddle_wordlists",{name:name,content:rd.result}).then(function(){loadSettings();});};
+  rd.readAsText(f);
+};
+function togglePanel(){document.getElementById("panel").classList.toggle("on");}
+
+function addRiddle(auto){
+  var t=document.getElementById("a_title").value.trim();if(!t)return;
+  j("/api/riddles",{title:t,media_type:document.getElementById("a_media").value,steps:auto?["assess","generate","recall"]:[]}).then(function(){
+    document.getElementById("a_title").value="";refresh(true);
   });
 }
-function delRiddle(rid){ fetch("/api/riddles/"+rid+"/delete",{method:"POST"}).then(refresh); }
-loadWordlists(); refresh(); setInterval(refresh, 5000);
+function batch(steps){
+  var ids=Object.keys(sel).filter(function(k){return sel[k];});if(!ids.length)return;
+  j("/api/riddles/batch",{ids:ids,steps:steps}).then(function(){sel={};refresh(true);});
+}
+
+var STATUSES=["draft","generated","valid","tested","published","rejected"];
+function refresh(force){
+  fetch("/api/riddles").then(function(r){return r.text();}).then(function(txt){
+    if(!force&&txt===listCache)return;
+    listCache=txt;render(JSON.parse(txt));
+  });
+}
+var lastList=[];
+function render(list){
+  if(list)lastList=list;list=lastList;
+  var counts={};list.forEach(function(r){counts[r.status]=(counts[r.status]||0)+1;});
+  document.getElementById("counts").textContent=list.length+" riddles";
+  var ph=STATUSES.filter(function(s){return counts[s];}).map(function(s){
+    return '<span class="pill'+(filt===s?" on":"")+'" onclick="filt=filt===\''+s+'\'?null:\''+s+'\';render()">'+s+' '+counts[s]+'</span>';
+  }).join("");
+  document.getElementById("pills").innerHTML=ph;
+  var c=document.getElementById("cards");
+  var shown=list.filter(function(r){return !filt||r.status===filt;});
+  var wantIds=shown.map(function(r){return r.id;});
+  Array.prototype.slice.call(c.children).forEach(function(n){if(wantIds.indexOf(n.dataset.id)<0)c.removeChild(n);});
+  shown.forEach(function(r,i){
+    var node=c.querySelector('[data-id="'+r.id+'"]');
+    if(!node){node=document.createElement("div");node.className="card";node.dataset.id=r.id;node.dataset.sig="";c.appendChild(node);}
+    if(c.children[i]!==node)c.insertBefore(node,c.children[i]);
+    var sig=JSON.stringify(r)+(sel[r.id]?"1":"0")+(openId===r.id?"o":"");
+    if(node.dataset.sig===sig)return;
+    node.dataset.sig=sig;
+    var flags=[];
+    if(r.busy)flags.push('<span class="busy">'+esc(r.busy)+'…</span>');
+    if(r.suit)flags.push("suit:"+esc(r.suit));
+    if(r.valid===true)flags.push('<span class="ok">valid</span>');else if(r.n_outside||r.n_fb)flags.push(r.n_outside+" out"+(r.n_fb?", "+r.n_fb+" fb":""));
+    if(r.recall_hit===true)flags.push('<span class="ok">recalled</span>');else if(r.recall_hit===false)flags.push("not recalled");
+    node.innerHTML='<div class="chead"><input type="checkbox" class="cb"'+(sel[r.id]?" checked":"")+'><span class="dot s-'+esc(r.status)+'"></span><span class="spoil" data-sp>'+esc(r.title)+'</span><span class="small">'+esc(r.media_type)+'</span><span class="meta">'+flags.join(" · ")+'</span></div>'+
+      '<div class="preview">'+(openId===r.id?"":esc((r.text||"").slice(0,180)))+'</div><div class="bench" style="display:none"></div>';
+    node.querySelector(".cb").onclick=function(e){e.stopPropagation();sel[r.id]=this.checked;updateBatchbar();node.dataset.sig="";};
+    node.querySelector("[data-sp]").onclick=function(e){e.stopPropagation();this.classList.toggle("show");};
+    node.querySelector(".chead").onclick=function(){openId=openId===r.id?null:r.id;render();if(openId===r.id)openBench(r.id,node);};
+    if(openId===r.id)openBench(r.id,node);
+  });
+  updateBatchbar();
+}
+function updateBatchbar(){
+  var n=Object.keys(sel).filter(function(k){return sel[k];}).length;
+  document.getElementById("batchbar").classList.toggle("on",n>0);
+  document.getElementById("bcount").textContent=n+" selected";
+}
+
+function openBench(rid,node){
+  var b=node.querySelector(".bench");b.style.display="block";
+  j("/api/riddles/"+rid).then(function(r){
+    var sig=JSON.stringify([r.text,r.validation,r.recall,r.busy,r.log&&r.log.length,r.forbidden,r.learner_words,r.status]);
+    if(riddleCache[rid]===sig)return;riddleCache[rid]=sig;
+    var v=r.validation||{}, out=v.outside||[], fb=v.forbidden_hits||[];
+    var vh="";
+    if(r.text){ vh=v.valid?'<span class="ok">✓ valid for vocab of '+(r.vocab_size||"?")+'</span>':
+      (out.length||fb.length? out.map(function(w){return '<span class="vw out">'+esc(w)+'</span>';}).join("")+fb.map(function(w){return '<span class="vw fb">'+esc(w)+'</span>';}).join("") :'<span class="small">not validated yet</span>'); }
+    var rec=r.recall?('recall: “'+esc(r.recall.guess)+'” '+(r.recall.hit?'<span class="ok">hit</span>':'miss')):"";
+    b.innerHTML='<textarea data-tx placeholder="riddle text — write or generate">'+esc(r.text||"")+'</textarea>'+
+      '<div class="vwords">'+vh+(rec?'<span style="margin-left:12px">'+rec+'</span>':"")+'</div>'+
+      '<div class="actions">'+
+      '<button data-a="assess">assess</button><button data-a="forbidden">forbidden</button><button data-a="generate" class="pri">generate</button><button data-a="validate">validate</button><button data-a="recall">recall</button>'+
+      '<span style="flex:1"></span>'+
+      (r.status!=="published"?'<button data-pub'+(r.status==="tested"?"":" title='not tested yet'")+'>publish</button>':"")+
+      (r.status!=="rejected"?'<button data-rej>reject</button>':'<button data-unrej>unreject</button>')+
+      '<button data-del class="ghost">delete</button></div>'+
+      '<div class="frow"><label>learner words</label><input type="text" data-lw value="'+esc((r.learner_words||[]).join(", "))+'" placeholder="extra allowed words"></div>'+
+      '<div class="frow"><label>extra forbidden</label><input type="text" data-xf value="'+esc((r.extra_forbidden||[]).join(", "))+'"></div>'+
+      (r.forbidden&&r.forbidden.length?'<div class="small">forbidden: '+esc(r.forbidden.join(", "))+'</div>':"")+
+      (r.suitability?'<div class="small" style="margin-top:6px">assessment: '+esc(r.suitability.verdict)+' — pop '+esc(r.suitability.popularity)+', retell '+esc(r.suitability.retellability)+(r.suitability.content_ok===false?', <b>content: '+esc(r.suitability.content_note)+'</b>':"")+' '+esc(r.suitability.retell_note||"")+'</div>':"")+
+      '<details><summary>attempts ('+(r.attempts||[]).length+') & log</summary><div>'+
+      (r.attempts||[]).map(function(a,i){return '<div class="att">#'+(i+1)+" "+(a.valid?'<span class="ok">valid</span>':a.outside.length+" out, "+a.forbidden_hits.length+" fb")+'<pre>'+esc(a.text)+'</pre></div>';}).join("")+
+      '<pre class="log">'+esc((r.log||[]).join("\n"))+'</pre></div></details>';
+    function saveFields(cb){
+      j("/api/riddles/"+rid,{text:b.querySelector("[data-tx]").value,
+        learner_words:b.querySelector("[data-lw]").value.split(/[,\n]/).map(function(w){return w.trim();}).filter(Boolean),
+        extra_forbidden:b.querySelector("[data-xf]").value.split(/[,\n]/).map(function(w){return w.trim();}).filter(Boolean)
+      }).then(function(){riddleCache[rid]="";if(cb)cb();});
+    }
+    b.querySelector("[data-tx]").onblur=function(){saveFields(function(){run(rid,["validate"]);});};
+    b.querySelectorAll("[data-a]").forEach(function(btn){btn.onclick=function(){var a=btn.dataset.a;saveFields(function(){run(rid,[a]);});};});
+    var pub=b.querySelector("[data-pub]");if(pub)pub.onclick=function(){j("/api/riddles/"+rid,{status:"published"}).then(function(){riddleCache[rid]="";refresh(true);});};
+    var rej=b.querySelector("[data-rej]");if(rej)rej.onclick=function(){j("/api/riddles/"+rid,{status:"rejected"}).then(function(){riddleCache[rid]="";refresh(true);});};
+    var unr=b.querySelector("[data-unrej]");if(unr)unr.onclick=function(){j("/api/riddles/"+rid,{status:"draft"}).then(function(){run(rid,["validate"]);});};
+    b.querySelector("[data-del]").onclick=function(){if(confirm("delete riddle?"))j("/api/riddles/"+rid+"/delete",{}).then(function(){openId=null;refresh(true);});};
+  });
+}
+function run(rid,steps){
+  j("/api/riddles/"+rid+"/run",{steps:steps}).then(function(){riddleCache[rid]="";refresh(true);poll(rid);});
+}
+function poll(rid){
+  setTimeout(function(){
+    j("/api/riddles/"+rid).then(function(r){
+      riddleCache[rid]="";refresh(true);
+      var node=document.querySelector('[data-id="'+rid+'"]');
+      if(openId===rid&&node)openBench(rid,node);
+      if(r.busy)poll(rid);
+    });
+  },1800);
+}
+setInterval(function(){refresh(false);},4000);
+loadSettings();refresh(true);
 </script>
 </body>
 </html>
