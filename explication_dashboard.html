@@ -483,8 +483,10 @@ function refreshPane(eid){
     });
   } else {
     api("/api/experiments/" + eid + "/log?n=150").then(function(r){ return r.text(); }).then(function(t){
+      t = t || "(empty log)";
+      if (pre.textContent === t) return;
       var atBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 30;
-      pre.textContent = t || "(empty log)";
+      pre.textContent = t;
       if (atBottom) pre.scrollTop = pre.scrollHeight;
     });
   }
@@ -503,8 +505,14 @@ function runModelTest(){
       var poll = setInterval(function(){
         api("/api/test_models/" + d.job).then(function(r){ return r.json(); }).then(function(j){
           st.textContent = j.completed + "/" + j.total + (j.done ? " done" : " ...");
+          var logTxt = j.log.join("\n");
+          if (!j.done){
+            var lp = out.querySelector("pre.livelog");
+            if (!lp){ out.innerHTML = "<pre class='bt livelog'></pre>"; lp = out.querySelector("pre.livelog"); }
+            if (lp.textContent !== logTxt){ var ab = lp.scrollHeight - lp.scrollTop - lp.clientHeight < 30; lp.textContent = logTxt; if (ab) lp.scrollTop = lp.scrollHeight; }
+            return;
+          }
           var logHtml = "<pre class='bt'>" + j.log.map(esc).join("\n") + "</pre>";
-          if (!j.done){ out.innerHTML = logHtml; return; }
           clearInterval(poll);
           var byModel = {};
           j.results.forEach(function(r){ (byModel[r.model] = byModel[r.model] || []).push(r); });

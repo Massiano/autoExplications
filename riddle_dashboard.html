@@ -81,7 +81,7 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <div id="topbar"><h1>Studio</h1>
 <span class="tab" data-v="providers" onclick="showView('providers')">Providers</span>
 <span class="tab" data-v="sources" onclick="showView('sources')">Sources</span>
-<span class="tab" data-v="enrich" onclick="showView('enrich')">Enrichment</span>
+<span class="tab" data-v="enrich" onclick="showView('enrich')">Annotate</span>
 <span class="tab" data-v="design" onclick="showView('design')">Item pipeline</span>
 <span class="tab" data-v="workloads" onclick="showView('workloads')">Workloads</span>
 <span class="tab" data-v="catalog" onclick="showView('catalog')">Catalog <span class="small" id="counts"></span></span>
@@ -118,7 +118,7 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 </div>
 
 <div class="view" id="v-enrich">
-<div class="step"><h2>Annotate <span class="small">the annotator set is a JSON you design; tick which to run over the list's canonical words</span></h2>
+<div class="step"><h2>Annotate <span class="small">the annotator set is a JSON parameter — each entry: {"desc", "type": llm|pos|member|copy, "prompt" (llm, with {words}), "list" (member/copy data reference), "column" (copy), "model", "batch"}; sources show which annotations they carry</span></h2>
 <div class="prow"><label>list <select id="e_list" onchange="tableCache='';loadTable()"></select></label>
 <span id="e_checks"></span>
 <label>model <input type="text" list="modelcat" id="e_model" style="width:200px" placeholder="(gen model)"></label>
@@ -140,18 +140,10 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 </div>
 
 <div class="view" id="v-workloads">
-<div class="step" id="wl_form"><h2>New workload <span class="small">batch job params + optional pipeline overrides in config{} — the JSON is what actually runs</span></h2>
-<div class="prow"><label>name <input type="text" data-w="name" style="width:150px" placeholder="(auto)"></label>
-<label>criteria <input type="text" data-w="criteria" style="width:230px" placeholder="e.g. 90s animated classics"></label>
-<select data-w="media_type" id="w_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
-<label>titles <input type="text" data-w="n" value="15" style="width:42px"></label></div>
-<div class="prow"><label><input type="checkbox" class="w_s" value="assess" checked> assess</label>
-<label><input type="checkbox" class="w_s" value="generate" checked> generate</label>
-<label><input type="checkbox" class="w_s" value="recall" checked> recall</label>
-<label><input type="checkbox" id="w_rej" checked> auto-reject</label>
-<label>stop after N tested <input type="text" data-w="target_tested" style="width:42px" placeholder="all"></label>
-<button class="pri" onclick="createWl()">start workload</button></div>
-<div id="wl_json"></div></div>
+<div class="step" id="wl_form"><h2>New workload <span class="small">runs an existing pipeline paramset — batch size, criteria and steps live inside that paramset</span></h2>
+<div class="prow"><label>name <input type="text" id="w_name" style="width:170px" placeholder="(auto from criteria)"></label>
+<label>paramset <select id="w_paramset"><option value="">(current saved pipeline)</option></select></label>
+<button class="pri" onclick="createWl()">start workload</button><span class="small" id="w_status"></span></div></div>
 <div id="wl_cards"></div>
 </div>
 
@@ -262,7 +254,7 @@ function loadSources(){
   j("/api/lex/sources").then(function(list){
     var d=document.getElementById("src_list");d.innerHTML="";
     list.forEach(function(s){
-      d.insertAdjacentHTML("beforeend",'<div class="step"><h2>'+esc(s.name)+' <span class="small">'+esc(s.origin)+' · '+s.words+' words'+(s.lessons?' · '+s.lessons+' lessons':'')+' · '+s.annotated+' annotated'+(s.busy?' · <span class="busy">annotating '+s.busy.done+"/"+s.busy.total+'</span>':'')+'</span><span style="margin-left:auto"></span>'+
+      d.insertAdjacentHTML("beforeend",'<div class="step"><h2>'+esc(s.name)+' <span class="small">'+esc(s.origin)+' · '+s.words+' words'+(s.lessons?' · '+s.lessons+' lessons':'')+' · '+s.annotated+' annotated'+((s.annotations||[]).length?' ['+esc(s.annotations.join(", "))+']':'')+(s.busy?' · <span class="busy">annotating '+s.busy.done+"/"+s.busy.total+'</span>':'')+'</span><span style="margin-left:auto"></span>'+
         '<button onclick="showView(\'enrich\');document.getElementById(\'e_list\').value=\''+esc(s.name)+'\';loadTable()">open</button>'+
         (s.origin==="uploaded"?'<button class="ghost" onclick="if(confirm(\'delete source and its annotations?\'))j(\'/api/lex/sources/'+esc(s.name)+'/delete\',{}).then(loadSources)">delete</button>':"")+'</h2></div>');
     });
@@ -377,11 +369,20 @@ function provApply(o){
   SHADOW.extra_params=o.extra_params||{};SHADOW.openrouter_provider=o.openrouter_provider||{};
   saveSettings();
 }
-function collectConfig(){
-  var cfg=provCollect();cfg.prompts={};
+function pipeCollect(){
+  var cfg={prompts:{},batch:{steps:[]}};
   document.querySelectorAll("#steps [data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
   document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
+  document.querySelectorAll("#steps [data-b]").forEach(function(el){cfg.batch[el.dataset.b]=el.type==="checkbox"?el.checked:el.value;});
+  document.querySelectorAll("#steps .b_s:checked").forEach(function(c){cfg.batch.steps.push(c.value);});
   cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
+  cfg.batch.n=+cfg.batch.n||15;cfg.batch.target_tested=+cfg.batch.target_tested||0;
+  cfg.providers_ref="(active provider settings)";cfg.annotators_ref="(annotator set, see Annotate tab)";
+  return cfg;
+}
+function collectConfig(){
+  var cfg={...provCollect(),...pipeCollect()};
+  delete cfg.providers_ref;delete cfg.annotators_ref;
   cfg.annotators=SHADOW.annotators;
   return cfg;
 }
@@ -389,7 +390,11 @@ function pipeApply(o){
   Object.keys(o.prompts||{}).forEach(function(k){var el=document.querySelector('#steps [data-pk="'+k+'"]');if(el)el.value=o.prompts[k];});
   ["gen_model","guess_model","judge_model","wordlist","upto_lesson","k_attempts","max_violations"].forEach(function(k){
     if(k in o){var el=document.querySelector('#steps [data-f="'+k+'"]');if(el)el.value=o[k];}});
-  provApply(o);
+  Object.keys(o.batch||{}).forEach(function(k){
+    if(k==="steps"){document.querySelectorAll("#steps .b_s").forEach(function(c){c.checked=o.batch.steps.indexOf(c.value)>=0;});return;}
+    var el=document.querySelector('#steps [data-b="'+k+'"]');if(!el)return;
+    if(el.type==="checkbox")el.checked=!!o.batch[k];else el.value=o.batch[k];});
+  saveSettings();
 }
 function saveSettings(){
   j("/api/riddle_settings",collectConfig()).then(function(s){S=s;fillFromSettings();
@@ -401,6 +406,9 @@ function fillFromSettings(){
   document.querySelectorAll('[data-f="temp"]').forEach(function(el){el.value=S.temp;});
   Object.keys(S.llm_params||{}).forEach(function(k){var el=document.querySelector('[data-lp="'+k+'"]');if(el)el.value=S.llm_params[k];});
   SHADOW.extra_params=S.extra_params||{};SHADOW.openrouter_provider=S.openrouter_provider||{};SHADOW.annotators=S.annotators||{};
+  var b=S.batch||{};
+  document.querySelectorAll("#steps [data-b]").forEach(function(el){var k=el.dataset.b;if(!(k in b))return;if(el.type==="checkbox")el.checked=!!b[k];else el.value=b[k];});
+  document.querySelectorAll("#steps .b_s").forEach(function(c){c.checked=(b.steps||[]).indexOf(c.value)>=0;});
   buildAnnotChecks();
   if(provEd)provEd.sync();if(pipeEd)pipeEd.sync();if(annotEd)annotEd.sync();
 }
@@ -422,7 +430,8 @@ function loadCatalog(){
     function show(){
       var items=d.catalog[sel2.value]||[];
       document.getElementById("cat_list").innerHTML=items.length?items.map(function(it){
-        return '<div style="margin:3px 0"><b>'+esc(it.name)+'</b> ('+esc(it.size)+') — '+esc(it.desc)+(it.url?' · <a href="'+esc(it.url)+'" target="_blank">source</a>':"")+'</div>';}).join(""):"no stubbed references for this language yet";
+        var links=(it.urls||(it.url?[{url:it.url,desc:"source"}]:[])).map(function(u){return '<a href="'+esc(u.url)+'" target="_blank">'+esc(u.desc||u.url)+'</a>';}).join(" · ");
+        return '<div style="margin:3px 0"><b>'+esc(it.name)+'</b> ('+esc(it.size)+') — '+esc(it.desc)+(links?' · '+links:"")+'</div>';}).join(""):"no stubbed references for this language yet";
     }
     sel2.onchange=show;show();
   });
@@ -436,12 +445,12 @@ function refreshWordlistSelects(){
 }
 
 var STEPDEFS=[
- {id:"discover",name:"1 · Discover",desc:"generate candidate titles from criteria",pk:"discover_prompt",params:"gen"},
- {id:"assess",name:"2 · Assess",desc:"suitability: popularity, content, retellability; poor/flagged can auto-reject",pk:"suitability_prompt",params:"judge"},
- {id:"forbidden",name:"3 · Forbidden terms",desc:"extract giveaway words (title, names, invented terms)",pk:"forbidden_prompt",params:"gen"},
- {id:"generate",name:"4 · Generate riddle",desc:"retell within the allowed vocabulary, k attempts, best kept",pk:"retell_prompt",params:"gen vocab kviol"},
- {id:"validate",name:"5 · Validate",desc:"deterministic: every word in vocab, no forbidden word — no LLM",pk:null,params:"vocab viol"},
- {id:"recall",name:"6 · Recall test",desc:"a cold model must guess the title back; judge settles near-misses",pk:"recall_prompt",params:"guess judge",pk2:"recall_judge_prompt"},
+ {id:"discover",name:"1 · Discover",desc:"generate candidate titles from criteria",io:"in: batch params (criteria, media, n) — out: draft items (title, media)",pk:"discover_prompt",params:"gen batch"},
+ {id:"assess",name:"2 · Assess",desc:"suitability: popularity, content, retellability; poor/flagged can auto-reject",io:"in: title — out: suitability {popularity, content_ok, retellability, verdict}",pk:"suitability_prompt",params:"judge"},
+ {id:"forbidden",name:"3 · Forbidden terms",desc:"extract giveaway words (title, names, invented terms)",io:"in: title — out: forbidden[] word set",pk:"forbidden_prompt",params:"gen"},
+ {id:"generate",name:"4 · Generate riddle",desc:"retell within the allowed vocabulary, k attempts, best kept",io:"in: title, forbidden[], wordlist(+annotations if present) — out: riddle text + attempts",pk:"retell_prompt",params:"gen vocab kviol"},
+ {id:"validate",name:"5 · Validate",desc:"deterministic: every word in vocab, no forbidden word — no LLM",io:"in: text, wordlist, forbidden[] — out: validation {outside[], forbidden_hits[], valid}",pk:null,params:"vocab viol"},
+ {id:"recall",name:"6 · Recall test",desc:"a cold model must guess the title back; judge settles near-misses",io:"in: text — out: recall {guess, hit}",pk:"recall_prompt",params:"guess judge",pk2:"recall_judge_prompt"},
 ];
 
 function modelInput(id,val,ph){return '<label>model <input type="text" list="modelcat" data-f="'+id+'" value="'+esc(val)+'" placeholder="'+(ph||"")+'" style="width:230px"></label>';}
@@ -449,8 +458,14 @@ function buildDesign(){
   var d=document.getElementById("steps");d.innerHTML="";
   STEPDEFS.forEach(function(sd){
     var h='<div class="step"><h2>'+sd.name+' <span class="small">'+sd.desc+'</span><span style="margin-left:auto"></span>'+
-      '<button data-try="'+sd.id+'">try</button></h2>';
+      '<button data-try="'+sd.id+'">try</button></h2><div class="small" style="margin:-2px 0 2px">'+sd.io+'</div>';
     var pr='<div class="prow">';
+    if(sd.params.indexOf("batch")>=0)pr+='<label>criteria <input type="text" data-b="criteria" style="width:180px"></label>'+
+      '<label>media <select data-b="media_type"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select></label>'+
+      '<label>n <input type="text" data-b="n" style="width:40px"></label>'+
+      '<label><input type="checkbox" data-b="auto_reject"> auto-reject</label>'+
+      '<label>target tested <input type="text" data-b="target_tested" style="width:40px"></label>'+
+      '<label>steps <label><input type="checkbox" class="b_s" value="assess"> a</label><label><input type="checkbox" class="b_s" value="generate"> g</label><label><input type="checkbox" class="b_s" value="recall"> r</label></label>';
     if(sd.params.indexOf("gen")>=0)pr+=modelInput("gen_model",S.gen_model);
     if(sd.params.indexOf("guess")>=0)pr+=modelInput("guess_model",S.guess_model,"(gen model)");
     if(sd.params.indexOf("judge")>=0)pr+=modelInput("judge_model",S.judge_model,"(gen model)");
@@ -540,25 +555,21 @@ function buildKeys(ks){
 function loadAll(){
   Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);fillFromSettings();loadCatalog();
     provEd=jsonEditor("prov_json",{scope:"providers",collect:provCollect,apply:provApply,watch:["#prov_cfg"],height:150});
-    pipeEd=jsonEditor("pipe_json",{scope:"pipeline",collect:collectConfig,apply:pipeApply,watch:["#steps","#prov_cfg"],height:240,filename:"item_pipeline"});
+    pipeEd=jsonEditor("pipe_json",{scope:"pipeline",collect:pipeCollect,apply:pipeApply,watch:["#steps"],height:240,filename:"item_pipeline"});
     annotEd=jsonEditor("annot_json",{scope:"annotators",collect:function(){return SHADOW.annotators;},apply:function(o){SHADOW.annotators=o;buildAnnotChecks();saveSettings();},height:170});
-    wlEd=jsonEditor("wl_json",{scope:"workload",collect:wlCollect,apply:wlApply,watch:["#wl_form"],applyLabel:"apply to form",height:150});
-    document.querySelectorAll(".w_s,#w_rej").forEach(function(c){c.addEventListener("change",function(){if(wlEd)wlEd.sync();});});
+    loadParamsets();
   });
 }
-function wlCollect(){
-  var steps=[];document.querySelectorAll(".w_s:checked").forEach(function(c){steps.push(c.value);});
-  var g=function(k){var el=document.querySelector('#wl_form [data-w="'+k+'"]');return el?el.value:"";};
-  return {name:g("name"),mode:"discover",criteria:g("criteria"),media_type:g("media_type"),n:+g("n")||15,steps:steps,auto_reject:document.getElementById("w_rej").checked,target_tested:+g("target_tested")||0,config:{}};
-}
-function wlApply(o){
-  ["name","criteria","media_type","n","target_tested"].forEach(function(k){var el=document.querySelector('#wl_form [data-w="'+k+'"]');if(el&&k in o)el.value=o[k];});
-  document.querySelectorAll(".w_s").forEach(function(c){c.checked=(o.steps||[]).indexOf(c.value)>=0;});
-  if("auto_reject" in o)document.getElementById("w_rej").checked=!!o.auto_reject;
+function loadParamsets(){
+  j("/api/presets/pipeline").then(function(ps){
+    var sel2=document.getElementById("w_paramset");sel2.innerHTML='<option value="">(current saved pipeline)</option>';
+    Object.keys(ps).forEach(function(n){var o=document.createElement("option");o.textContent=n;sel2.appendChild(o);});
+  });
 }
 function createWl(){
-  var body;try{body=wlEd.get();}catch(e){body=wlCollect();}
-  j("/api/workloads",body).then(function(d){if(d.id){wlOpen=d.id;refreshWl(true);}});
+  j("/api/workloads",{name:document.getElementById("w_name").value,paramset:document.getElementById("w_paramset").value}).then(function(d){
+    document.getElementById("w_status").textContent=d.error||"";
+    if(d.id){wlOpen=d.id;refreshWl(true);}});
 }
 function discover(){
   var st=document.getElementById("d_status");st.textContent=" · generating list…";

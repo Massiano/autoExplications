@@ -6,13 +6,15 @@ DEFAULT_SETTINGS = {
     "llm_params": {"top_p": "", "frequency_penalty": "", "presence_penalty": "", "seed": "", "stop": "", "max_retries": 3, "timeout": 120},
     "extra_params": {},
     "openrouter_provider": {},
+    "batch": {"criteria": "", "media_type": "movie", "n": 15, "steps": ["assess", "generate", "recall"], "auto_reject": True, "target_tested": 0},
     "annotators": {
-        "topic": {"type": "llm", "prompt": "Assign each word exactly ONE broad thematic topic label (lowercase, one word or hyphenated, e.g. food, family, travel, body, work, nature, emotion, time, number, function-word). Words: {words}\nRespond ONLY with a JSON object mapping each word to its topic. No fences, no comments."},
-        "level": {"type": "llm", "prompt": "Estimate the CEFR level (A1, A2, B1, B2, C1, C2) at which a foreign learner of English typically acquires each word. Words: {words}\nRespond ONLY with a JSON object mapping each word to its level."},
-        "concreteness": {"type": "llm", "prompt": "Rate the concreteness of each word from 1 (fully abstract) to 5 (fully concrete, picturable object or action). Words: {words}\nRespond ONLY with a JSON object mapping each word to an integer 1-5."},
-        "picturable": {"type": "llm", "prompt": "For each word decide if it can be conveyed by a simple picture or short picture sequence without any text (yes/no). Words: {words}\nRespond ONLY with a JSON object mapping each word to yes or no."},
-        "register": {"type": "llm", "prompt": "Classify each word's register as one of: neutral, formal, informal, technical, archaic. Words: {words}\nRespond ONLY with a JSON object mapping each word to its register."},
-        "pos": {"type": "pos"},
+        "topic": {"desc": "broad thematic group of the word", "type": "llm", "prompt": "Assign each word exactly ONE broad thematic topic label (lowercase, one word or hyphenated, e.g. food, family, travel, body, work, nature, emotion, time, number, function-word). Words: {words}\nRespond ONLY with a JSON object mapping each word to its topic. No fences, no comments."},
+        "level": {"desc": "CEFR acquisition level estimate", "type": "llm", "prompt": "Estimate the CEFR level (A1, A2, B1, B2, C1, C2) at which a foreign learner of English typically acquires each word. Words: {words}\nRespond ONLY with a JSON object mapping each word to its level."},
+        "concreteness": {"desc": "1 abstract .. 5 picturable object/action", "type": "llm", "prompt": "Rate the concreteness of each word from 1 (fully abstract) to 5 (fully concrete, picturable object or action). Words: {words}\nRespond ONLY with a JSON object mapping each word to an integer 1-5."},
+        "picturable": {"desc": "conveyable by a wordless picture (yes/no)", "type": "llm", "prompt": "For each word decide if it can be conveyed by a simple picture or short picture sequence without any text (yes/no). Words: {words}\nRespond ONLY with a JSON object mapping each word to yes or no."},
+        "register": {"desc": "neutral/formal/informal/technical/archaic", "type": "llm", "prompt": "Classify each word's register as one of: neutral, formal, informal, technical, archaic. Words: {words}\nRespond ONLY with a JSON object mapping each word to its register."},
+        "pos": {"desc": "part of speech, local nltk tagger", "type": "pos"},
+        "in_ltwf": {"desc": "membership flag against an existing list (data reference)", "type": "member", "list": "ltwf"},
     },
     "prompts": {
         "forbidden_prompt": "List the giveaway terms for the {media_type} '{title}': every word of the title, main character names, actor/author/creator names, iconic invented terms, and place names unique to it. Output ONLY a comma-separated list of lowercase single words (split multi-word names into their words). No explanations.",
@@ -250,6 +252,21 @@ def run_annotators(name, annotators, model, cfg):
                 _save(annot_path(name), ann)
                 job["done"] += len(words)
                 continue
+            if spec.get("type") == "member":
+                ref = set(canonical_words(spec["list"]))
+                for w in words: ann.setdefault(w, {})[a] = "yes" if w in ref else "no"
+                _save(annot_path(name), ann)
+                job["done"] += len(words)
+                continue
+            if spec.get("type") == "copy":
+                src = load_annot(spec["list"])
+                col = spec.get("column", a)
+                for w in words:
+                    v = src.get(w, {}).get(col)
+                    if v is not None: ann.setdefault(w, {})[a] = v
+                _save(annot_path(name), ann)
+                job["done"] += len(words)
+                continue
             todo = [w for w in words if a not in ann.get(w, {})]
             for i in range(0, len(todo), int(spec.get("batch", 40))):
                 batch = todo[i:i + int(spec.get("batch", 40))]
@@ -374,7 +391,7 @@ def run_workload(wid):
 LANG_GROUPS = [["spanish", "chinese", "arabic"], ["french", "german", "english", "italian"], ["korean", "japanese"], ["turkish", "portuguese", "russian", "hindi"]]
 STUB_CATALOG = {
     "english": [
-        {"name": "NGSL (New General Service List)", "size": "~2800 lemmas", "desc": "high-coverage core vocabulary from a 273M corpus", "url": "https://www.newgeneralservicelist.com/"},
+        {"name": "NGSL (New General Service List)", "size": "~2800 lemmas", "desc": "high-coverage core vocabulary from a 273M corpus", "urls": [{"url": "https://www.newgeneralservicelist.com/", "desc": "official site, downloadable xlsx"}, {"url": "https://www.eapfoundation.com/vocab/general/ngsl/", "desc": "browsable with definitions"}]},
         {"name": "GSL (West 1953)", "size": "~2000", "desc": "the classic general service list", "url": "https://en.wikipedia.org/wiki/General_Service_List"},
         {"name": "Oxford 3000 / 5000", "size": "3000/5000", "desc": "CEFR-tagged learner core, A1-C1", "url": "https://www.oxfordlearnersdictionaries.com/wordlists/"},
         {"name": "AWL (Academic Word List)", "size": "570 families", "desc": "academic add-on beyond GSL", "url": "https://www.wgtn.ac.nz/lals/resources/academicwordlist"},
@@ -413,10 +430,15 @@ def register(app, exp_dir):
     @app.route("/api/workloads", methods=["POST"])
     def wl_create():
         body = request.get_json(force=True)
-        wid = time.strftime("w_%Y%m%d_%H%M%S")
-        spec = {"mode": body.get("mode", "discover"), "criteria": body.get("criteria", ""), "media_type": body.get("media_type", "movie"), "n": int(body.get("n", 15)), "steps": [s for s in body.get("steps", ["assess", "generate", "recall"]) if s in STEPS], "auto_reject": bool(body.get("auto_reject", True)), "target_tested": int(body.get("target_tested") or 0), "config": body.get("config") or {}}
+        wid = time.strftime("w_%Y%m%d_%H%M%S_") + os.urandom(2).hex()
+        ps_name = (body.get("paramset") or "").strip()
+        base = _load(_p("_presets"), {}).get("pipeline", {}).get(ps_name) if ps_name else None
+        if ps_name and base is None: return jsonify({"error": f"unknown pipeline paramset '{ps_name}'"}), 400
+        cfg = {**settings(), **(base or {})}
+        b = {**DEFAULT_SETTINGS["batch"], **(cfg.get("batch") or {})}
+        spec = {"mode": body.get("mode", "discover"), "criteria": b["criteria"], "media_type": b["media_type"], "n": int(b["n"]), "steps": [s for s in b["steps"] if s in STEPS], "auto_reject": bool(b["auto_reject"]), "target_tested": int(b["target_tested"] or 0), "paramset": ps_name or "(current)", "config": base or {}}
         ids = [i for i in body.get("ids", []) if load_riddle(i)] if spec["mode"] == "existing" else []
-        w = {"id": wid, "name": body.get("name") or (spec["criteria"][:40] or spec["media_type"] + " batch"), "status": "running", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "spec": spec, "config_snapshot": settings(), "riddle_ids": ids, "pending": list(ids), "calls": 0, "log": []}
+        w = {"id": wid, "name": (body.get("name") or "").strip() or (spec["criteria"][:40] or spec["media_type"] + " batch"), "status": "running", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "spec": spec, "config_snapshot": cfg, "riddle_ids": ids, "pending": list(ids), "calls": 0, "log": []}
         if spec["mode"] == "existing":
             for rid in ids:
                 r = load_riddle(rid); r["workload"] = wid
@@ -506,11 +528,13 @@ def register(app, exp_dir):
         seen = set()
         for path in sorted(glob.glob(os.path.join(list_dir(), "*.json"))):
             n = os.path.basename(path).rsplit(".", 1)[0]; seen.add(n)
-            out.append({"name": n, "origin": "uploaded", "words": len(canonical_words(n)), "lessons": len(wordlist_lessons(n)), "annotated": len(load_annot(n)), "busy": ANNOT_JOBS.get(n)})
+            an = load_annot(n)
+            out.append({"name": n, "origin": "uploaded", "words": len(canonical_words(n)), "lessons": len(wordlist_lessons(n)), "annotated": len(an), "annotations": sorted({c for v in an.values() for c in v}), "busy": ANNOT_JOBS.get(n)})
         for path in sorted(glob.glob("wordlists/*.json")):
             n = os.path.basename(path).rsplit(".", 1)[0]
             if n in seen: continue
-            out.append({"name": n, "origin": "built-in", "words": len(canonical_words(n)), "lessons": len(wordlist_lessons(n)), "annotated": len(load_annot(n)), "busy": ANNOT_JOBS.get(n)})
+            an = load_annot(n)
+            out.append({"name": n, "origin": "built-in", "words": len(canonical_words(n)), "lessons": len(wordlist_lessons(n)), "annotated": len(an), "annotations": sorted({c for v in an.values() for c in v}), "busy": ANNOT_JOBS.get(n)})
         return jsonify(out)
 
     @app.route("/api/lex/sources", methods=["POST"])
