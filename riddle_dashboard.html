@@ -83,6 +83,7 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <span class="tab" data-v="sources" onclick="showView('sources')">Sources</span>
 <span class="tab" data-v="enrich" onclick="showView('enrich')">Enrichment</span>
 <span class="tab" data-v="design" onclick="showView('design')">Riddle pipeline</span>
+<span class="tab" data-v="workloads" onclick="showView('workloads')">Workloads</span>
 <span class="tab" data-v="catalog" onclick="showView('catalog')">Catalog <span class="small" id="counts"></span></span>
 <span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">explications</button></div>
 
@@ -98,7 +99,13 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <label>stop (comma sep) <input type="text" data-lp="stop" style="width:120px"></label>
 <label>max_retries <input type="text" data-lp="max_retries" style="width:44px"></label>
 <label>min s between calls <input type="text" data-f="min_interval" style="width:50px"></label></div>
-<div style="margin-top:8px"><button class="pri" onclick="saveSettings()">save</button> <span class="small" id="p_status"></span></div></div>
+<div class="small" style="margin-top:8px">extra params JSON — merged into every request body last, any provider-specific field goes here.<br>
+OpenRouter note: a plain model id (e.g. meta-llama/llama-3.3-70b-instruct) lets OpenRouter route to any upstream host; suffixes pin behavior (:free, :nitro fastest, :floor cheapest); 'openrouter/auto' lets it pick the model too; to force or order upstream hosts use e.g. {"provider":{"order":["DeepInfra"],"allow_fallbacks":false}} here.</div>
+<textarea id="extra_params" style="height:56px;font:12px/1.4 ui-monospace,monospace" placeholder='{"reasoning_effort":"low"}'></textarea>
+<div style="margin-top:8px"><button class="pri" onclick="saveSettings()">save</button> <span class="small" id="p_status"></span>
+<span style="margin-left:16px"></span><button onclick="cfgBox('export')">export full config</button><button onclick="cfgBox('import')">import</button></div>
+<textarea id="cfg_json" style="display:none;height:180px;font:11.5px/1.4 ui-monospace,monospace;margin-top:8px"></textarea>
+<div id="cfg_actions" style="display:none;margin-top:6px"><button class="pri" onclick="cfgApply()">apply pasted config</button><span class="small" id="cfg_status"></span></div></div>
 </div>
 
 <div class="view" id="v-sources">
@@ -135,6 +142,21 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <datalist id="modelcat"></datalist>
 </div>
 
+<div class="view" id="v-workloads">
+<div class="step"><h2>New workload <span class="small">a controlled production run with the current saved pipeline</span></h2>
+<div class="prow"><label>name <input type="text" id="w_name" style="width:150px" placeholder="(auto)"></label>
+<label>criteria <input type="text" id="w_criteria" style="width:230px" placeholder="e.g. 90s animated classics"></label>
+<select id="w_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
+<label>titles <input type="text" id="w_n" value="15" style="width:42px"></label></div>
+<div class="prow"><label><input type="checkbox" class="w_s" value="assess" checked> assess</label>
+<label><input type="checkbox" class="w_s" value="generate" checked> generate</label>
+<label><input type="checkbox" class="w_s" value="recall" checked> recall</label>
+<label><input type="checkbox" id="w_rej" checked> auto-reject</label>
+<label>stop after N tested <input type="text" id="w_target" style="width:42px" placeholder="all"></label>
+<button class="pri" onclick="createWl()">start workload</button></div></div>
+<div id="wl_cards"></div>
+</div>
+
 <div class="view" id="v-catalog">
 <div id="addrow">
 <input type="text" id="d_criteria" placeholder="criteria, e.g. animated classics of the 90s (optional)" onkeydown="if(event.key==='Enter')discover()">
@@ -156,6 +178,7 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 </div>
 
 <div id="batchbar"><span id="bcount"></span>
+<button onclick="wlFromSelection()">run as workload</button>
 <button onclick="batch(['assess'])">assess</button>
 <button onclick="batch(['generate','recall'])">generate+recall</button>
 <button onclick="batch(['validate'])">revalidate</button>
@@ -168,8 +191,64 @@ var S=null, WL={}, sel={}, filt=null, openId=null, listCache="", riddleCache={};
 function esc(s){var d=document.createElement("div");d.textContent=s==null?"":s;return d.innerHTML;}
 function j(u,body){return fetch(u,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:undefined).then(function(r){return r.json();});}
 function showView(v){document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("on",t.dataset.v===v);});
-  ["providers","sources","enrich","design","catalog"].forEach(function(x){document.getElementById("v-"+x).classList.toggle("on",x===v);});
-  if(v==="sources")loadSources();if(v==="enrich")loadEnrich();}
+  ["providers","sources","enrich","design","workloads","catalog"].forEach(function(x){document.getElementById("v-"+x).classList.toggle("on",x===v);});
+  if(v==="sources")loadSources();if(v==="enrich")loadEnrich();if(v==="workloads")refreshWl(true);}
+
+var wlOpen=null, wlCache="", wlDetailCache="";
+function createWl(){
+  var steps=[];document.querySelectorAll(".w_s:checked").forEach(function(c){steps.push(c.value);});
+  j("/api/workloads",{name:document.getElementById("w_name").value,criteria:document.getElementById("w_criteria").value,
+    media_type:document.getElementById("w_media").value,n:+document.getElementById("w_n").value||15,steps:steps,
+    auto_reject:document.getElementById("w_rej").checked,target_tested:+document.getElementById("w_target").value||0}).then(function(d){
+    if(d.id){wlOpen=d.id;refreshWl(true);}});
+}
+function wlFromSelection(){
+  var ids=Object.keys(sel).filter(function(k){return sel[k];});if(!ids.length)return;
+  j("/api/workloads",{mode:"existing",ids:ids,name:"selection "+ids.length,steps:["assess","generate","recall"]}).then(function(d){
+    sel={};wlOpen=d.id;showView("workloads");});
+}
+function refreshWl(force){
+  fetch("/api/workloads").then(function(r){return r.text();}).then(function(txt){
+    if(!force&&txt===wlCache)return;wlCache=txt;
+    var list=JSON.parse(txt), c=document.getElementById("wl_cards");c.innerHTML="";
+    var anyLive=false;
+    list.forEach(function(w){
+      if(w.status==="running"||w.status==="paused")anyLive=true;
+      var cn=w.counts, prog=cn.total?Math.round(100*(cn.total-cn.pending)/cn.total):0;
+      var div=document.createElement("div");div.className="card";
+      div.innerHTML='<div class="chead"><span class="dot s-'+(w.status==="done"?"tested":w.status==="running"?"generated":w.status==="error"?"rejected":"draft")+'"></span>'+
+        '<b>'+esc(w.name)+'</b><span class="small">'+esc(w.status)+' · '+prog+'% · '+cn.tested+' tested / '+cn.total+' · '+w.calls+' calls</span>'+
+        '<span class="meta">'+
+        (w.status==="running"?'<button data-c="pause">pause</button>':"")+
+        ((w.status==="paused"||w.status==="interrupted"||w.status==="stopped"||w.status==="error")&&cn.pending?'<button data-c="resume">resume</button>':"")+
+        ((w.status==="running"||w.status==="paused")?'<button data-c="stop">stop</button>':"")+
+        '<button data-c="delete" class="ghost">delete</button></span></div><div class="bench" style="display:none"></div>';
+      div.querySelector(".chead").onclick=function(e){if(e.target.tagName==="BUTTON")return;wlOpen=wlOpen===w.id?null:w.id;wlDetailCache="";refreshWl(true);};
+      div.querySelectorAll("[data-c]").forEach(function(b){b.onclick=function(){
+        if(b.dataset.c==="delete"&&!confirm("delete workload record? (riddles stay in catalog)"))return;
+        j("/api/workloads/"+w.id+"/ctl",{action:b.dataset.c}).then(function(){wlCache="";refreshWl(true);});};});
+      c.appendChild(div);
+      if(wlOpen===w.id)openWl(w.id,div);
+    });
+    if(anyLive)setTimeout(function(){refreshWl(false);},2500);
+  });
+}
+function openWl(wid,div){
+  var b=div.querySelector(".bench");b.style.display="block";
+  fetch("/api/workloads/"+wid).then(function(r){return r.text();}).then(function(txt){
+    if(txt===wlDetailCache)return;wlDetailCache=txt;
+    var w=JSON.parse(txt), cn=w.counts;
+    var h='<div class="small">spec: '+esc(w.spec.mode)+' · '+esc(w.spec.media_type)+(w.spec.criteria?' · "'+esc(w.spec.criteria)+'"':"")+' · steps '+esc((w.spec.steps||[]).join("→"))+(w.spec.target_tested?' · target '+w.spec.target_tested:"")+'</div>'+
+      '<div class="vwords">'+["pending","draft","rejected","generated","valid","tested","published"].map(function(k){return cn[k]?'<span class="vw '+(k==="tested"||k==="published"?"":k==="rejected"?"fb":"out")+'">'+k+" "+cn[k]+"</span>":"";}).join("")+'</div>';
+    (w.riddles||[]).forEach(function(r){
+      h+='<div class="att"><span class="dot s-'+esc(r.status)+'" style="display:inline-block;margin-right:6px"></span><span class="spoil" onclick="this.classList.toggle(\'show\')">'+esc(r.title)+'</span> <span class="small">'+esc(r.status)+(r.suit?' · '+esc(r.suit):"")+(r.hit===true?' · <span class="ok">recalled</span>':r.hit===false?' · miss: “'+esc(r.guess)+'”':"")+(r.pending?' · queued':"")+'</span>'+
+        ' <button class="ghost" style="padding:0 6px" onclick="showView(\'catalog\');openId=\''+r.id+'\';refresh(true)">open</button></div>';
+    });
+    h+='<details open><summary>log</summary><pre class="log">'+esc((w.log||[]).join("\n"))+'</pre></details>';
+    b.innerHTML=h;
+    var lg=b.querySelector("pre.log");lg.scrollTop=lg.scrollHeight;
+  });
+}
 
 function srcLoaderChanged(){document.getElementById("src_colwrap").style.display=document.getElementById("src_loader").value==="csv"?"":"none";}
 var srcContent="";
@@ -259,8 +338,26 @@ function testProvider(prov,btn){
   btn.textContent="…";
   j("/api/provider_test/"+prov,{}).then(function(d){
     btn.textContent="test";
-    btn.insertAdjacentHTML("afterend",'<span class="small"> '+(d.ok?('<span class="ok">ok</span> '+d.seconds+"s"):('<span class="err">'+esc(d.error)+'</span>'))+'</span>');
+    btn.insertAdjacentHTML("afterend",'<span class="small"> '+(d.ok?('<span class="ok">ok</span> '+d.seconds+"s · "+esc(d.model)):('<span class="err">'+esc(d.error)+'</span>'))+'</span>');
   });
+}
+function cfgBox(mode){
+  var ta=document.getElementById("cfg_json"),ac=document.getElementById("cfg_actions");
+  ta.style.display="block";
+  if(mode==="export"){ta.value=JSON.stringify(S,null,1);ac.style.display="none";ta.select();}
+  else{ta.value="";ta.placeholder="paste a full config JSON here";ac.style.display="block";}
+}
+function cfgApply(){
+  try{var cfg=JSON.parse(document.getElementById("cfg_json").value);}
+  catch(e){document.getElementById("cfg_status").textContent="invalid JSON: "+e.message;return;}
+  j("/api/riddle_settings",cfg).then(function(s){S=s;document.getElementById("cfg_status").textContent="applied";fillFromSettings();buildDesign();});
+}
+function fillFromSettings(){
+  document.querySelector('[data-f="max_tokens"]').value=S.max_tokens||"";
+  document.querySelector('[data-f="min_interval"]').value=S.min_interval;
+  document.querySelector('[data-f="temp"]').value=S.temp;
+  Object.keys(S.llm_params||{}).forEach(function(k){var el=document.querySelector('[data-lp="'+k+'"]');if(el)el.value=S.llm_params[k];});
+  document.getElementById("extra_params").value=Object.keys(S.extra_params||{}).length?JSON.stringify(S.extra_params):"";
 }
 
 var STEPDEFS=[
@@ -310,6 +407,8 @@ function collectConfig(){
   document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
   cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
   cfg.max_tokens=+cfg.max_tokens||0;cfg.min_interval=+cfg.min_interval||1;cfg.temp=+cfg.temp||0.7;
+  var ep=document.getElementById("extra_params").value.trim();
+  try{cfg.extra_params=ep?JSON.parse(ep):{};}catch(e){cfg.extra_params=S.extra_params||{};alert("extra params JSON invalid, keeping previous");}
   return cfg;
 }
 function saveSettings(){
@@ -340,22 +439,19 @@ function uploadList(){
   rd.readAsText(f);
 }
 
-var modelsLoaded=false;
+var modelSeen={};
+function addModelOpt(val,label){if(modelSeen[val])return;modelSeen[val]=1;var o=document.createElement("option");o.value=val;if(label)o.label=label;document.getElementById("modelcat").appendChild(o);}
 function loadModels(ks){
-  if(modelsLoaded)return;modelsLoaded=true;
-  var dl=document.getElementById("modelcat");
+  document.getElementById("modelcat").innerHTML="";modelSeen={};
+  addModelOpt("openrouter/auto","openrouter picks a model");
   j("/api/openrouter_models").then(function(d){
-    (d.models||[]).forEach(function(m){
-      var o=document.createElement("option");o.value=m.id;
-      o.label=(m.free?"free":("$"+m.prompt_per_m+"/"+m.completion_per_m+" per M"))+" · ctx "+(m.context||"?");
-      dl.appendChild(o);
-    });
+    (d.models||[]).forEach(function(m){addModelOpt(m.id,(m.free?"free":("$"+m.prompt_per_m+"/"+m.completion_per_m+" per M"))+" · ctx "+(m.context||"?"));});
   });
   Object.keys(ks).forEach(function(env){
     var k=ks[env];
     if(!k.set||k.provider==="openrouter")return;
     j("/api/provider_models/"+k.provider).then(function(d){
-      (d.ids||[]).forEach(function(id){var o=document.createElement("option");o.value=k.provider+"::"+id;dl.appendChild(o);});
+      (d.ids||[]).forEach(function(id){addModelOpt(k.provider+"::"+id.replace(/^models\//,""));});
     });
   });
 }
@@ -370,19 +466,12 @@ function buildKeys(ks){
   });
   d.querySelectorAll("[data-savekey]").forEach(function(b){b.onclick=function(){
     var env=b.dataset.savekey,val=d.querySelector('[data-key="'+env+'"]').value;
-    if(!val)return;var body={};body[env]=val;j("/api/riddle_keys",body).then(function(ks2){buildKeys(ks2);
-      var prov=ks2[env]&&ks2[env].provider;
-      if(prov&&prov!=="openrouter")j("/api/provider_models/"+prov).then(function(d){var dl=document.getElementById("modelcat");
-        (d.ids||[]).forEach(function(id){var o=document.createElement("option");o.value=prov+"::"+id;dl.appendChild(o);});});});};});
+    if(!val)return;var body={};body[env]=val;j("/api/riddle_keys",body).then(function(ks2){buildKeys(ks2);loadModels(ks2);});};});
   d.querySelectorAll("[data-clearkey]").forEach(function(b){b.onclick=function(){
-    var body={};body[b.dataset.clearkey]="";j("/api/riddle_keys",body).then(buildKeys);};});
+    var body={};body[b.dataset.clearkey]="";j("/api/riddle_keys",body).then(function(ks2){buildKeys(ks2);loadModels(ks2);});};});
 }
 function loadAll(){
-  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);
-    document.querySelector('[data-f="max_tokens"]').value=S.max_tokens||"";
-    document.querySelector('[data-f="min_interval"]').value=S.min_interval;
-    document.querySelector('[data-f="temp"]').value=S.temp;
-    Object.keys(S.llm_params||{}).forEach(function(k){var el=document.querySelector('[data-lp="'+k+'"]');if(el)el.value=S.llm_params[k];});});
+  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);fillFromSettings();});
 }
 function discover(){
   var st=document.getElementById("d_status");st.textContent=" · generating list…";

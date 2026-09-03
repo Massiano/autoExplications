@@ -4,6 +4,7 @@ import pipeline
 DEFAULT_SETTINGS = {
     "wordlist": "ltwf", "upto_lesson": "12H", "gen_model": "openai/gpt-4o-mini", "guess_model": "", "judge_model": "", "max_violations": 0, "k_attempts": 3, "min_interval": 1.0, "temp": 0.7, "max_tokens": 2000,
     "llm_params": {"top_p": "", "frequency_penalty": "", "presence_penalty": "", "seed": "", "stop": "", "max_retries": 3, "timeout": 120},
+    "extra_params": {},
     "prompts": {
         "forbidden_prompt": "List the giveaway terms for the {media_type} '{title}': every word of the title, main character names, actor/author/creator names, iconic invented terms, and place names unique to it. Output ONLY a comma-separated list of lowercase single words (split multi-word names into their words). No explanations.",
         "retell_prompt": "Retell the {media_type} '{title}' as a riddle, without giving away which {media_type} it is. Every single word of your output must come from the allowed word list below. Do not use any forbidden word. Do not use the title or any names. Keep it short, 3 to 6 sentences, plot and feel, so someone who knows the {media_type} could guess it.\nForbidden words: {forbidden}\nAllowed words: {vocab_list}\nOutput only the riddle text.",
@@ -91,6 +92,7 @@ def strip_json(s):
 def llm(temp, cfg):
     lp = {**DEFAULT_SETTINGS["llm_params"], **(cfg.get("llm_params") or {})}
     params = {k: (float(lp[k]) if k in ("top_p", "frequency_penalty", "presence_penalty") else (int(lp[k]) if k == "seed" else ([s.strip() for s in str(lp[k]).split(",") if s.strip()] if k == "stop" else lp[k]))) for k in ("top_p", "frequency_penalty", "presence_penalty", "seed", "stop") if str(lp.get(k, "")).strip() != ""}
+    params.update(cfg.get("extra_params") or {})
     return pipeline.make_rate_limited(pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), temp, max_retries=int(lp.get("max_retries", 3)), max_tokens=cfg.get("max_tokens"), params=params), float(cfg.get("min_interval", 1.0)))
 
 def list_dir(): return os.path.join(DIR, "_lists")
@@ -287,12 +289,135 @@ def run_steps(rid, steps):
         log(r, f"ERROR {s}: {e}"); save_riddle(r)
     BUSY.pop(rid, None)
 
+WCTL = {}
+
+def wpath(wid): return os.path.join(DIR, "_workloads", wid + ".json")
+def load_wl(wid): return _load(wpath(wid), None)
+def save_wl(w): w["updated"] = time.strftime("%Y-%m-%d %H:%M:%S"); _save(wpath(w["id"]), w)
+
+def list_wls():
+    out = [w for w in (_load(p, None) for p in glob.glob(os.path.join(DIR, "_workloads", "w_*.json"))) if w]
+    out.sort(key=lambda w: w.get("created", ""), reverse=True)
+    return out
+
+def wlog(w, msg): w.setdefault("log", []).append(f"{time.strftime('%H:%M:%S')} {msg}"); w["log"] = w["log"][-400:]
+
+def wl_counts(w):
+    c = {"total": len(w["riddle_ids"]), "pending": len(w["pending"]), "rejected": 0, "generated": 0, "valid": 0, "tested": 0, "draft": 0, "published": 0}
+    for rid in w["riddle_ids"]:
+        r = load_riddle(rid)
+        if r and r["status"] in c: c[r["status"]] += 1
+    return c
+
+def run_workload(wid):
+    w = load_wl(wid)
+    ctl = WCTL.setdefault(wid, {"pause": False, "stop": False})
+    spec = w["spec"]
+    try:
+        if spec.get("mode", "discover") == "discover" and not w["riddle_ids"]:
+            wlog(w, "discovering titles"); save_wl(w)
+            s = settings()
+            raw = llm(0.8, s)(s["prompts"]["discover_prompt"].format(n=int(spec.get("n", 15)), media_type=spec.get("media_type", "movie"), criteria=spec.get("criteria", "")), s["gen_model"]); w["calls"] += 1
+            existing = {r["title"].casefold() for r in list_riddles()}
+            for line in raw.splitlines():
+                t = re.sub(r"^\s*[\d\.\)\-\*]+\s*", "", line).strip().strip('"').strip()
+                t = re.sub(r"\s*\(\d{4}\)\s*$", "", t)
+                if not t or len(t) > 90 or t.lower().startswith(("here", "sure", "these")) or t.casefold() in existing: continue
+                existing.add(t.casefold())
+                rid = time.strftime("r_%Y%m%d_%H%M%S_") + re.sub(r"\W+", "", t.lower())[:24] + f"_{len(w['riddle_ids'])}"
+                save_riddle({"id": rid, "title": t, "media_type": spec.get("media_type", "movie"), "status": "draft", "text": "", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "workload": wid, "config": {}, "learner_words": [], "extra_forbidden": [], "forbidden": [], "attempts": [], "log": [], "suitability": None, "validation": None, "recall": None})
+                w["riddle_ids"].append(rid)
+            w["pending"] = list(w["riddle_ids"])
+            wlog(w, f"discovered {len(w['riddle_ids'])} titles"); save_wl(w)
+        steps, target = spec.get("steps") or ["assess", "generate", "recall"], int(spec.get("target_tested") or 0)
+        while w["pending"]:
+            while ctl["pause"] and not ctl["stop"]:
+                if w["status"] != "paused": w["status"] = "paused"; wlog(w, "paused"); save_wl(w)
+                time.sleep(1)
+            if ctl["stop"]: w["status"] = "stopped"; wlog(w, "stopped"); save_wl(w); WCTL.pop(wid, None); return
+            if w["status"] != "running": w["status"] = "running"; save_wl(w)
+            rid = w["pending"][0]
+            r = load_riddle(rid)
+            if not r: w["pending"].pop(0); save_wl(w); continue
+            interrupted = False
+            for s_ in steps:
+                if ctl["stop"] or ctl["pause"]: interrupted = True; break
+                try:
+                    STEPS[s_](r); w["calls"] += (int(cfg_of(r).get("k_attempts", 3)) + 1 if s_ == "generate" else (0 if s_ == "validate" else 1))
+                    save_riddle(r)
+                    if s_ == "assess" and spec.get("auto_reject", True):
+                        su = r.get("suitability") or {}
+                        if su.get("verdict") == "poor" or su.get("content_ok") is False:
+                            r["status"] = "rejected"; log(r, "auto-rejected"); save_riddle(r); break
+                except Exception as e:
+                    wlog(w, f"{r['title']}: ERROR {s_}: {str(e)[:150]}"); log(r, f"ERROR {s_}: {e}"); save_riddle(r); break
+            if interrupted: save_wl(w); continue
+            w["pending"].pop(0)
+            wlog(w, f"{r['title']} -> {load_riddle(rid)['status']}")
+            save_wl(w)
+            if target and wl_counts(w)["tested"] >= target:
+                wlog(w, f"target of {target} tested reached"); break
+        w["status"] = "done"; wlog(w, "workload complete"); save_wl(w)
+    except Exception as e:
+        w["status"] = "error"; wlog(w, "FATAL " + str(e)[:200]); save_wl(w)
+    WCTL.pop(wid, None)
+
 def register(app, exp_dir):
     global DIR
     from flask import request, jsonify, send_from_directory
     DIR = os.path.join(exp_dir, "_riddles")
     os.makedirs(DIR, exist_ok=True)
     apply_keys()
+    for w in list_wls():
+        if w["status"] in ("running", "paused"): w["status"] = "interrupted"; wlog(w, "interrupted by restart"); save_wl(w)
+
+    @app.route("/api/workloads", methods=["GET"])
+    def wl_list():
+        return jsonify([{k: w.get(k) for k in ("id", "name", "status", "calls", "created", "updated")} | {"counts": wl_counts(w), "spec": w["spec"]} for w in list_wls()])
+
+    @app.route("/api/workloads", methods=["POST"])
+    def wl_create():
+        body = request.get_json(force=True)
+        wid = time.strftime("w_%Y%m%d_%H%M%S")
+        spec = {"mode": body.get("mode", "discover"), "criteria": body.get("criteria", ""), "media_type": body.get("media_type", "movie"), "n": int(body.get("n", 15)), "steps": [s for s in body.get("steps", ["assess", "generate", "recall"]) if s in STEPS], "auto_reject": bool(body.get("auto_reject", True)), "target_tested": int(body.get("target_tested") or 0)}
+        ids = [i for i in body.get("ids", []) if load_riddle(i)] if spec["mode"] == "existing" else []
+        w = {"id": wid, "name": body.get("name") or (spec["criteria"][:40] or spec["media_type"] + " batch"), "status": "running", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "spec": spec, "config_snapshot": settings(), "riddle_ids": ids, "pending": list(ids), "calls": 0, "log": []}
+        if spec["mode"] == "existing":
+            for rid in ids:
+                r = load_riddle(rid); r["workload"] = wid; save_riddle(r)
+        save_wl(w)
+        threading.Thread(target=run_workload, args=(wid,), daemon=True).start()
+        return jsonify({"id": wid})
+
+    @app.route("/api/workloads/<wid>", methods=["GET"])
+    def wl_get(wid):
+        w = load_wl(wid)
+        if not w: return jsonify({"error": "not found"}), 404
+        riddles_ = []
+        for rid in w["riddle_ids"]:
+            r = load_riddle(rid)
+            if r: riddles_.append({"id": rid, "title": r["title"], "status": r["status"], "guess": (r.get("recall") or {}).get("guess"), "hit": (r.get("recall") or {}).get("hit"), "suit": (r.get("suitability") or {}).get("verdict"), "n_out": len((r.get("validation") or {}).get("outside", [])), "pending": rid in w["pending"]})
+        return jsonify({k: w.get(k) for k in ("id", "name", "status", "calls", "spec", "log", "created", "updated")} | {"counts": wl_counts(w), "riddles": riddles_})
+
+    @app.route("/api/workloads/<wid>/ctl", methods=["POST"])
+    def wl_ctl(wid):
+        w = load_wl(wid)
+        if not w: return jsonify({"error": "not found"}), 404
+        act = request.get_json(force=True).get("action")
+        if act == "pause" and wid in WCTL: WCTL[wid]["pause"] = True
+        elif act == "resume":
+            if wid in WCTL: WCTL[wid]["pause"] = False
+            elif w["status"] in ("interrupted", "paused", "stopped", "error") and w["pending"]:
+                w["status"] = "running"; wlog(w, "resumed"); save_wl(w)
+                threading.Thread(target=run_workload, args=(wid,), daemon=True).start()
+        elif act == "stop":
+            if wid in WCTL: WCTL[wid]["stop"] = True
+            else: w["status"] = "stopped"; save_wl(w)
+        elif act == "delete":
+            if wid in WCTL: WCTL[wid]["stop"] = True
+            if os.path.exists(wpath(wid)): os.remove(wpath(wid))
+            return jsonify({"deleted": wid})
+        return jsonify({"status": load_wl(wid)["status"] if load_wl(wid) else "deleted"})
 
     @app.route("/api/riddle_keys", methods=["GET"])
     def get_keys(): return jsonify(key_status())
@@ -300,7 +425,19 @@ def register(app, exp_dir):
     @app.route("/api/provider_test/<prov>", methods=["POST"])
     def provider_test(prov):
         if prov not in pipeline.PROVIDERS: return jsonify({"error": "unknown provider"}), 404
-        model = (request.get_json(force=True) or {}).get("model") or {"openrouter": "openai/gpt-4o-mini", "groq": "groq::llama-3.1-8b-instant", "gemini": "gemini::gemini-2.0-flash", "mistral": "mistral::mistral-small-latest", "cerebras": "cerebras::llama3.1-8b", "dashscope": "dashscope::qwen-turbo", "deepseek": "deepseek::deepseek-chat"}.get(prov, "openai/gpt-4o-mini")
+        p = pipeline.PROVIDERS[prov]
+        model = (request.get_json(force=True) or {}).get("model", "").strip()
+        if not model:
+            try:
+                import requests as rq
+                resp = rq.get(p["base_url"] + "/models", headers={"Authorization": "Bearer " + os.environ.get(p["key_env"], "")}, timeout=20).json()
+                ids = [m.get("id") or m.get("name", "") for m in (resp.get("data") or resp.get("models") or [])]
+                ids = [i.split("/")[-1] if prov == "gemini" else i for i in ids if i]
+                pref = [i for h in ("flash", "instant", "haiku", "small", "turbo", r"(^|[^a-z])mini", "8b") for i in ids if re.search(h, i.lower())]
+                model = (pref or ids)[0]
+            except Exception as e:
+                return jsonify({"ok": False, "error": f"could not list models: {str(e)[:200]}"})
+            if prov != "openrouter": model = f"{prov}::{model}"
         t0 = time.time()
         try:
             out = pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), 0.0, max_retries=0, max_tokens=8)("Reply with the single word: ok", model)
