@@ -51,11 +51,29 @@ pre.bt { white-space: pre-wrap; background: #faf8f2; border: 1px dashed #ccc; pa
 .l-scaf .chip { background: #f6e4e4; }
 #topbar { position: sticky; top: 0; background: #f4f2ec; padding: 4px 0; border-bottom: 1px solid #ccc; }
 input[type=text] { font-family: monospace; font-size: 13px; }
+
+/* unified studio style */
+body { font-family: system-ui, sans-serif; font-size: 14px; background: #f6f5f1; color: #1c1b18; line-height: 1.45; }
+h1 { font-size: 19px; font-weight: 650; }
+h2 { font-size: 14.5px; border-bottom: none; }
+button, .tabs button, .qcbtn { font-family: inherit; font-size: 13px; border: 1px solid #d8d4c8; background: #fff; border-radius: 7px; padding: 4px 10px; color: #1c1b18; cursor: pointer; }
+button:hover, .qcbtn:hover { border-color: #a9a493; }
+.tabs button.on { background: #2a2a26; color: #fff; border-color: #2a2a26; font-weight: 600; }
+input[type=text], input[type=number], select, textarea { font-family: inherit; font-size: 13px; border: 1px solid #d8d4c8; border-radius: 7px; padding: 4px 8px; background: #fff; color: inherit; }
+input:focus, textarea:focus { outline: none; border-color: #8a8474; }
+th { background: #efece2; }
+td, th { border-color: #e6e2d6; }
+.word, .runcard { border: 1px solid #e6e2d6; background: #fff; border-radius: 10px; padding: 8px 10px; }
+pre.bt, pre { font-family: ui-monospace, monospace; background: #f3f1ea; border: none; border-radius: 7px; padding: 8px; }
+textarea.note, pre, code { font-family: ui-monospace, monospace; }
+.qcbtn.sel-good { background: #dcedd4; } .qcbtn.sel-bad { background: #f4d8d4; } .qcbtn.sel-meh { background: #f4ecc9; }
+#studio-nav { float: right; margin-top: 8px; }
 </style>
 </head>
 <body>
 <div id="wrap">
 <div id="topbar">
+<a id="studio-nav" href="/riddles"><button>item creation studio →</button></a>
 <h1>explication pipeline dashboard</h1>
 <div id="files"><input type="file" id="fileinput" multiple accept=".json"> <span class="small">load one or more pipeline_state.json</span></div>
 <div class="tabs" id="tabs"></div>

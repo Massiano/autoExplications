@@ -5,15 +5,21 @@ DEFAULT_SETTINGS = {
     "wordlist": "ltwf", "upto_lesson": "12H", "gen_model": "openai/gpt-4o-mini", "guess_model": "", "judge_model": "", "max_violations": 0, "k_attempts": 3, "min_interval": 1.0, "temp": 0.7, "max_tokens": 2000,
     "llm_params": {"top_p": "", "frequency_penalty": "", "presence_penalty": "", "seed": "", "stop": "", "max_retries": 3, "timeout": 120},
     "extra_params": {},
+    "openrouter_provider": {},
+    "annotators": {
+        "topic": {"type": "llm", "prompt": "Assign each word exactly ONE broad thematic topic label (lowercase, one word or hyphenated, e.g. food, family, travel, body, work, nature, emotion, time, number, function-word). Words: {words}\nRespond ONLY with a JSON object mapping each word to its topic. No fences, no comments."},
+        "level": {"type": "llm", "prompt": "Estimate the CEFR level (A1, A2, B1, B2, C1, C2) at which a foreign learner of English typically acquires each word. Words: {words}\nRespond ONLY with a JSON object mapping each word to its level."},
+        "concreteness": {"type": "llm", "prompt": "Rate the concreteness of each word from 1 (fully abstract) to 5 (fully concrete, picturable object or action). Words: {words}\nRespond ONLY with a JSON object mapping each word to an integer 1-5."},
+        "picturable": {"type": "llm", "prompt": "For each word decide if it can be conveyed by a simple picture or short picture sequence without any text (yes/no). Words: {words}\nRespond ONLY with a JSON object mapping each word to yes or no."},
+        "register": {"type": "llm", "prompt": "Classify each word's register as one of: neutral, formal, informal, technical, archaic. Words: {words}\nRespond ONLY with a JSON object mapping each word to its register."},
+        "pos": {"type": "pos"},
+    },
     "prompts": {
         "forbidden_prompt": "List the giveaway terms for the {media_type} '{title}': every word of the title, main character names, actor/author/creator names, iconic invented terms, and place names unique to it. Output ONLY a comma-separated list of lowercase single words (split multi-word names into their words). No explanations.",
         "retell_prompt": "Retell the {media_type} '{title}' as a riddle, without giving away which {media_type} it is. Every single word of your output must come from the allowed word list below. Do not use any forbidden word. Do not use the title or any names. Keep it short, 3 to 6 sentences, plot and feel, so someone who knows the {media_type} could guess it.\nForbidden words: {forbidden}\nAllowed words: {vocab_list}\nOutput only the riddle text.",
         "recall_prompt": "This is a riddle describing a {media_type}. Which {media_type} is it? Text: '{text}'. Respond with ONLY the title, nothing else.",
         "recall_judge_prompt": "Target {media_type}: '{title}'. A reader guessed: '{guess}'. Is that the same {media_type} (ignore subtitles, articles, translations)? Answer exactly one word: yes or no.",
         "discover_prompt": "List {n} {media_type}s for a guessing game aimed at adult foreign-language learners: widely known internationally, family-friendly, with plots that can be retold in very simple words. {criteria}\nOutput ONLY one title per line. No numbering, no years, no explanations.",
-        "annot_topic_prompt": "Assign each word exactly ONE broad thematic topic label (lowercase, one word or hyphenated, e.g. food, family, travel, body, work, nature, emotion, time, number, function-word). Words: {words}\nRespond ONLY with a JSON object mapping each word to its topic. No fences, no comments.",
-        "annot_level_prompt": "Estimate the CEFR level (A1, A2, B1, B2, C1, C2) at which a foreign learner of English typically acquires each word. Words: {words}\nRespond ONLY with a JSON object mapping each word to its level.",
-        "annot_concreteness_prompt": "Rate the concreteness of each word from 1 (fully abstract) to 5 (fully concrete, picturable object or action). Words: {words}\nRespond ONLY with a JSON object mapping each word to an integer 1-5.",
         "suitability_prompt": "Assess the {media_type} '{title}' as material for a vocabulary-limited guessing riddle aimed at adult foreign-language learners. Respond ONLY with a JSON object, no markdown fences, with keys: popularity (1-5, how widely known globally), content_ok (true/false, false if sexual/graphic-violence/otherwise inappropriate for a general learning app), content_note (short string), retellability (1-5, how well the plot can be conveyed in very simple concrete words), retell_note (short string), verdict (one of: good, ok, poor).",
     },
 }
@@ -50,7 +56,9 @@ def key_status():
         out[env] = {"provider": name, "set": bool(os.environ.get(env) or stored.get(env)), "source": "env" if env in os.environ and env not in stored else ("saved" if stored.get(env) else "")}
     return out
 
-def settings(): return {**DEFAULT_SETTINGS, **_load(_p("_settings"), {}), "prompts": {**DEFAULT_SETTINGS["prompts"], **_load(_p("_settings"), {}).get("prompts", {})}}
+def settings():
+    s = _load(_p("_settings"), {})
+    return {**DEFAULT_SETTINGS, **s, "prompts": {**DEFAULT_SETTINGS["prompts"], **s.get("prompts", {})}, "annotators": {**DEFAULT_SETTINGS["annotators"], **s.get("annotators", {})}}
 
 def load_riddle(rid): return _load(_p(rid), None)
 def save_riddle(r): r["updated"] = time.strftime("%Y-%m-%d %H:%M:%S"); _save(_p(r["id"]), r)
@@ -93,6 +101,7 @@ def llm(temp, cfg):
     lp = {**DEFAULT_SETTINGS["llm_params"], **(cfg.get("llm_params") or {})}
     params = {k: (float(lp[k]) if k in ("top_p", "frequency_penalty", "presence_penalty") else (int(lp[k]) if k == "seed" else ([s.strip() for s in str(lp[k]).split(",") if s.strip()] if k == "stop" else lp[k]))) for k in ("top_p", "frequency_penalty", "presence_penalty", "seed", "stop") if str(lp.get(k, "")).strip() != ""}
     params.update(cfg.get("extra_params") or {})
+    if cfg.get("openrouter_provider"): params["__or_provider"] = cfg["openrouter_provider"]
     return pipeline.make_rate_limited(pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), temp, max_retries=int(lp.get("max_retries", 3)), max_tokens=cfg.get("max_tokens"), params=params), float(cfg.get("min_interval", 1.0)))
 
 def list_dir(): return os.path.join(DIR, "_lists")
@@ -225,26 +234,26 @@ def canonical_words(name):
 def run_annotators(name, annotators, model, cfg):
     words = canonical_words(name)
     ann = load_annot(name)
-    job = ANNOT_JOBS[name] = {"done": 0, "total": len(words) * len(annotators), "error": ""}
+    specs = cfg.get("annotators") or {}
+    annotators = [a for a in annotators if a in specs]
+    job = ANNOT_JOBS[name] = {"done": 0, "total": max(1, len(words) * len(annotators)), "error": ""}
     errs = []
-    if "pos" in annotators:
-        try:
-            import nltk
-            try: nltk.pos_tag(["test"])
-            except LookupError: nltk.download("averaged_perceptron_tagger_eng", quiet=True); nltk.download("averaged_perceptron_tagger", quiet=True)
-            for w, tag in nltk.pos_tag(words): ann.setdefault(w, {})["pos"] = tag
-            _save(annot_path(name), ann)
-        except Exception as e: errs.append(f"pos: {e}")
-        job["done"] += len(words)
-    pk = {"topic": "annot_topic_prompt", "level": "annot_level_prompt", "concreteness": "annot_concreteness_prompt"}
     svc = llm(0.2, cfg)
     for a in annotators:
-        if a not in pk: continue
+        spec = specs[a]
         try:
+            if spec.get("type") == "pos":
+                import nltk
+                try: nltk.pos_tag(["test"])
+                except LookupError: nltk.download("averaged_perceptron_tagger_eng", quiet=True); nltk.download("averaged_perceptron_tagger", quiet=True)
+                for w, tag in nltk.pos_tag(words): ann.setdefault(w, {})[a] = tag
+                _save(annot_path(name), ann)
+                job["done"] += len(words)
+                continue
             todo = [w for w in words if a not in ann.get(w, {})]
-            for i in range(0, len(todo), 40):
-                batch = todo[i:i + 40]
-                raw = svc(cfg["prompts"][pk[a]].format(words=", ".join(batch)), model)
+            for i in range(0, len(todo), int(spec.get("batch", 40))):
+                batch = todo[i:i + int(spec.get("batch", 40))]
+                raw = svc(spec["prompt"].format(words=", ".join(batch)), spec.get("model") or model)
                 try: m = json.loads(strip_json(raw))
                 except Exception: m = {}
                 for w in batch:
@@ -325,7 +334,7 @@ def run_workload(wid):
                 if not t or len(t) > 90 or t.lower().startswith(("here", "sure", "these")) or t.casefold() in existing: continue
                 existing.add(t.casefold())
                 rid = time.strftime("r_%Y%m%d_%H%M%S_") + re.sub(r"\W+", "", t.lower())[:24] + f"_{len(w['riddle_ids'])}"
-                save_riddle({"id": rid, "title": t, "media_type": spec.get("media_type", "movie"), "status": "draft", "text": "", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "workload": wid, "config": {}, "learner_words": [], "extra_forbidden": [], "forbidden": [], "attempts": [], "log": [], "suitability": None, "validation": None, "recall": None})
+                save_riddle({"id": rid, "title": t, "media_type": spec.get("media_type", "movie"), "status": "draft", "text": "", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "workload": wid, "config": dict(spec.get("config") or {}), "learner_words": [], "extra_forbidden": [], "forbidden": [], "attempts": [], "log": [], "suitability": None, "validation": None, "recall": None})
                 w["riddle_ids"].append(rid)
             w["pending"] = list(w["riddle_ids"])
             wlog(w, f"discovered {len(w['riddle_ids'])} titles"); save_wl(w)
@@ -362,6 +371,32 @@ def run_workload(wid):
         w["status"] = "error"; wlog(w, "FATAL " + str(e)[:200]); save_wl(w)
     WCTL.pop(wid, None)
 
+LANG_GROUPS = [["spanish", "chinese", "arabic"], ["french", "german", "english", "italian"], ["korean", "japanese"], ["turkish", "portuguese", "russian", "hindi"]]
+STUB_CATALOG = {
+    "english": [
+        {"name": "NGSL (New General Service List)", "size": "~2800 lemmas", "desc": "high-coverage core vocabulary from a 273M corpus", "url": "https://www.newgeneralservicelist.com/"},
+        {"name": "GSL (West 1953)", "size": "~2000", "desc": "the classic general service list", "url": "https://en.wikipedia.org/wiki/General_Service_List"},
+        {"name": "Oxford 3000 / 5000", "size": "3000/5000", "desc": "CEFR-tagged learner core, A1-C1", "url": "https://www.oxfordlearnersdictionaries.com/wordlists/"},
+        {"name": "AWL (Academic Word List)", "size": "570 families", "desc": "academic add-on beyond GSL", "url": "https://www.wgtn.ac.nz/lals/resources/academicwordlist"},
+        {"name": "Ogden Basic English", "size": "850", "desc": "minimal definitional core, close to our seed idea", "url": "https://en.wikipedia.org/wiki/Basic_English"},
+        {"name": "VOA Special English", "size": "~1500", "desc": "broadcast simple-English lexicon", "url": "https://en.wikipedia.org/wiki/Special_English"},
+        {"name": "SUBTLEX-US top-N", "size": "any N", "desc": "subtitle frequency norms, CSV", "url": "https://www.ugent.be/pp/experimentele-psychologie/en/research/documents/subtlexus"},
+        {"name": "Dolch / Fry sight words", "size": "220/1000", "desc": "child L1 reading lists, useful A0 floor", "url": "https://en.wikipedia.org/wiki/Dolch_word_list"},
+    ],
+    "spanish": [{"name": "SUBTLEX-ESP", "size": "any N", "desc": "subtitle frequency norms", "url": "http://crr.ugent.be/programs-data/subtitle-frequencies"}, {"name": "Instituto Cervantes PCIC inventories", "size": "A1-C2", "desc": "official CEFR notional-functional lists", "url": "https://cvc.cervantes.es/ensenanza/biblioteca_ele/plan_curricular/"}, {"name": "RAE CREA/CORPES frequency", "size": "any N", "desc": "corpus frequency lists", "url": "https://www.rae.es/banco-de-datos"}],
+    "chinese": [{"name": "HSK 1-6 (2010) / HSK 3.0", "size": "150-5000+", "desc": "official graded vocabulary", "url": "https://en.wikipedia.org/wiki/Hanyu_Shuiping_Kaoshi"}, {"name": "SUBTLEX-CH", "size": "any N", "desc": "subtitle frequency norms", "url": "http://crr.ugent.be/programs-data/subtitle-frequencies"}],
+    "arabic": [{"name": "KELLY Arabic", "size": "~9000", "desc": "CEFR-graded frequency-based learner list", "url": "https://spraakbanken.gu.se/en/projects/kelly"}, {"name": "Buckwalter/Parkinson frequency dictionary", "size": "5000", "desc": "Routledge frequency dictionary", "url": "https://www.routledge.com/"}],
+    "french": [{"name": "Français fondamental", "size": "~1500/3000", "desc": "Gougenheim classic graded core", "url": "https://en.wikipedia.org/wiki/Fran%C3%A7ais_fondamental"}, {"name": "Lexique 3", "size": "any N", "desc": "frequency database (film subtitles + books)", "url": "http://www.lexique.org/"}, {"name": "Alliance Française / CECR lists", "size": "A1-C2", "desc": "exam-oriented CEFR vocab", "url": "https://www.france-education-international.fr/"}],
+    "german": [{"name": "Goethe-Zertifikat Wortlisten", "size": "A1-B1 official", "desc": "official exam vocabulary", "url": "https://www.goethe.de/"}, {"name": "DeReWo", "size": "any N", "desc": "IDS corpus frequency ranks", "url": "https://www.ids-mannheim.de/digspra/kl/projekte/methoden/derewo/"}, {"name": "SUBTLEX-DE", "size": "any N", "desc": "subtitle frequency norms", "url": "http://crr.ugent.be/programs-data/subtitle-frequencies"}],
+    "italian": [{"name": "Nuovo vocabolario di base (De Mauro)", "size": "~7000", "desc": "fundamental/high-use/high-availability strata", "url": "https://www.internazionale.it/opinione/tullio-de-mauro/2016/12/23/il-nuovo-vocabolario-di-base-della-lingua-italiana"}, {"name": "SUBTLEX-IT", "size": "any N", "desc": "subtitle frequency norms", "url": "http://crr.ugent.be/programs-data/subtitle-frequencies"}],
+    "korean": [{"name": "TOPIK vocabulary", "size": "~2000/6000", "desc": "official graded lists (beginner/intermediate)", "url": "https://www.topik.go.kr/"}, {"name": "NIKL 한국어 학습용 어휘", "size": "~6000", "desc": "National Institute learner vocabulary", "url": "https://www.korean.go.kr/"}],
+    "japanese": [{"name": "JLPT N5-N1 lists", "size": "~800-10000", "desc": "de-facto graded vocabulary (unofficial compilations)", "url": "https://en.wikipedia.org/wiki/Japanese-Language_Proficiency_Test"}, {"name": "BCCWJ frequency", "size": "any N", "desc": "balanced corpus frequency", "url": "https://clrd.ninjal.ac.jp/bccwj/en/"}],
+    "turkish": [{"name": "Turkish National Corpus frequency", "size": "any N", "desc": "TNC-derived frequency lists", "url": "https://www.tnc.org.tr/"}, {"name": "Yeni Hitit course vocab", "size": "A1-B2", "desc": "widespread coursebook-derived lists", "url": ""}],
+    "portuguese": [{"name": "SUBTLEX-PT", "size": "any N", "desc": "subtitle frequency norms", "url": "http://crr.ugent.be/programs-data/subtitle-frequencies"}],
+    "russian": [{"name": "Kelly Russian / lexical minimums (TORFL)", "size": "A1-C2", "desc": "official lexical minimums", "url": "https://spraakbanken.gu.se/en/projects/kelly"}],
+    "hindi": [{"name": "Hindi frequency lists (HindEnCorp / Leipzig)", "size": "any N", "desc": "corpus-derived frequency", "url": "https://wortschatz.uni-leipzig.de/en/download"}],
+}
+
 def register(app, exp_dir):
     global DIR
     from flask import request, jsonify, send_from_directory
@@ -379,12 +414,14 @@ def register(app, exp_dir):
     def wl_create():
         body = request.get_json(force=True)
         wid = time.strftime("w_%Y%m%d_%H%M%S")
-        spec = {"mode": body.get("mode", "discover"), "criteria": body.get("criteria", ""), "media_type": body.get("media_type", "movie"), "n": int(body.get("n", 15)), "steps": [s for s in body.get("steps", ["assess", "generate", "recall"]) if s in STEPS], "auto_reject": bool(body.get("auto_reject", True)), "target_tested": int(body.get("target_tested") or 0)}
+        spec = {"mode": body.get("mode", "discover"), "criteria": body.get("criteria", ""), "media_type": body.get("media_type", "movie"), "n": int(body.get("n", 15)), "steps": [s for s in body.get("steps", ["assess", "generate", "recall"]) if s in STEPS], "auto_reject": bool(body.get("auto_reject", True)), "target_tested": int(body.get("target_tested") or 0), "config": body.get("config") or {}}
         ids = [i for i in body.get("ids", []) if load_riddle(i)] if spec["mode"] == "existing" else []
         w = {"id": wid, "name": body.get("name") or (spec["criteria"][:40] or spec["media_type"] + " batch"), "status": "running", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "spec": spec, "config_snapshot": settings(), "riddle_ids": ids, "pending": list(ids), "calls": 0, "log": []}
         if spec["mode"] == "existing":
             for rid in ids:
-                r = load_riddle(rid); r["workload"] = wid; save_riddle(r)
+                r = load_riddle(rid); r["workload"] = wid
+                if spec["config"]: r["config"] = {**(r.get("config") or {}), **spec["config"]}
+                save_riddle(r)
         save_wl(w)
         threading.Thread(target=run_workload, args=(wid,), daemon=True).start()
         return jsonify({"id": wid})
@@ -421,6 +458,24 @@ def register(app, exp_dir):
 
     @app.route("/api/riddle_keys", methods=["GET"])
     def get_keys(): return jsonify(key_status())
+
+    @app.route("/api/lex/catalog")
+    def lex_catalog(): return jsonify({"groups": LANG_GROUPS, "catalog": STUB_CATALOG})
+
+    @app.route("/api/presets/<scope>", methods=["GET"])
+    def presets_get(scope): return jsonify(_load(_p("_presets"), {}).get(scope, {}))
+
+    @app.route("/api/presets/<scope>", methods=["POST"])
+    def presets_set(scope):
+        body = request.get_json(force=True)
+        allp = _load(_p("_presets"), {})
+        sc = allp.setdefault(scope, {})
+        name = (body.get("name") or "").strip()
+        if not name: return jsonify({"error": "no name"}), 400
+        if body.get("delete"): sc.pop(name, None)
+        else: sc[name] = body.get("value")
+        _save(_p("_presets"), allp)
+        return jsonify(sc)
 
     @app.route("/api/provider_test/<prov>", methods=["POST"])
     def provider_test(prov):
@@ -490,10 +545,10 @@ def register(app, exp_dir):
     @app.route("/api/lex/annotate", methods=["POST"])
     def lex_annotate():
         body = request.get_json(force=True)
-        name, annotators = body.get("list"), [a for a in body.get("annotators", []) if a in ("topic", "level", "concreteness", "pos")]
-        if not name or not annotators: return jsonify({"error": "need list and annotators"}), 400
-        if ANNOT_JOBS.get(name): return jsonify({"error": "busy"}), 409
         s = settings()
+        name, annotators = body.get("list"), [a for a in body.get("annotators", []) if a in s.get("annotators", {})]
+        if not name or not annotators: return jsonify({"error": "need list and known annotators"}), 400
+        if ANNOT_JOBS.get(name): return jsonify({"error": "busy"}), 409
         model = body.get("model") or s["gen_model"]
         ANNOT_JOBS[name] = {"done": 0, "total": 1, "error": ""}
         threading.Thread(target=run_annotators, args=(name, annotators, model, s), daemon=True).start()

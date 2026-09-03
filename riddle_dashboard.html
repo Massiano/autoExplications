@@ -82,14 +82,14 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <span class="tab" data-v="providers" onclick="showView('providers')">Providers</span>
 <span class="tab" data-v="sources" onclick="showView('sources')">Sources</span>
 <span class="tab" data-v="enrich" onclick="showView('enrich')">Enrichment</span>
-<span class="tab" data-v="design" onclick="showView('design')">Riddle pipeline</span>
+<span class="tab" data-v="design" onclick="showView('design')">Item pipeline</span>
 <span class="tab" data-v="workloads" onclick="showView('workloads')">Workloads</span>
 <span class="tab" data-v="catalog" onclick="showView('catalog')">Catalog <span class="small" id="counts"></span></span>
 <span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">explications</button></div>
 
 <div class="view" id="v-providers">
 <div class="step"><h2>API keys <span class="small">values are never displayed; env vars beat saved keys</span></h2><div id="keys"></div></div>
-<div class="step"><h2>Cross-model parameters <span class="small">sent with every call where the provider supports them; blank = provider default</span></h2>
+<div class="step" id="prov_cfg"><h2>Provider configuration <span class="small">cross-model params + openrouter routing; the JSON is the truth, fields are shortcuts</span></h2>
 <div class="prow"><label>max_tokens <input type="text" data-f="max_tokens" style="width:64px"></label>
 <label>temperature <input type="text" data-f="temp" style="width:50px"></label>
 <label>top_p <input type="text" data-lp="top_p" style="width:50px"></label>
@@ -99,16 +99,14 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <label>stop (comma sep) <input type="text" data-lp="stop" style="width:120px"></label>
 <label>max_retries <input type="text" data-lp="max_retries" style="width:44px"></label>
 <label>min s between calls <input type="text" data-f="min_interval" style="width:50px"></label></div>
-<div class="small" style="margin-top:8px">extra params JSON — merged into every request body last, any provider-specific field goes here.<br>
-OpenRouter note: a plain model id (e.g. meta-llama/llama-3.3-70b-instruct) lets OpenRouter route to any upstream host; suffixes pin behavior (:free, :nitro fastest, :floor cheapest); 'openrouter/auto' lets it pick the model too; to force or order upstream hosts use e.g. {"provider":{"order":["DeepInfra"],"allow_fallbacks":false}} here.</div>
-<textarea id="extra_params" style="height:56px;font:12px/1.4 ui-monospace,monospace" placeholder='{"reasoning_effort":"low"}'></textarea>
-<div style="margin-top:8px"><button class="pri" onclick="saveSettings()">save</button> <span class="small" id="p_status"></span>
-<span style="margin-left:16px"></span><button onclick="cfgBox('export')">export full config</button><button onclick="cfgBox('import')">import</button></div>
-<textarea id="cfg_json" style="display:none;height:180px;font:11.5px/1.4 ui-monospace,monospace;margin-top:8px"></textarea>
-<div id="cfg_actions" style="display:none;margin-top:6px"><button class="pri" onclick="cfgApply()">apply pasted config</button><span class="small" id="cfg_status"></span></div></div>
+<div class="small" style="margin-top:6px">keys beyond the fields: <b>extra_params</b> merges into every request body; <b>openrouter_provider</b> is OpenRouter's routing preference, e.g. {"order":["DeepInfra"],"allow_fallbacks":false} or {"sort":"price"} — plain model ids route freely, suffixes pin (:free :nitro :floor), 'openrouter/auto' also picks the model.</div>
+<div id="prov_json"></div></div>
 </div>
 
 <div class="view" id="v-sources">
+<div class="step"><h2>Reference catalog <span class="small">well-known lists per project language — obtain the file, then load it below</span></h2>
+<div class="prow"><label>language <select id="cat_lang"></select></label></div>
+<div id="cat_list" class="small" style="margin-top:6px"></div></div>
 <div class="step"><h2>Load a source <span class="small">every database/CSV is distinct — pick the loader, preview, then save</span></h2>
 <div class="prow"><label>name <input type="text" id="src_name" style="width:140px"></label>
 <label>loader <select id="src_loader"><option value="auto">auto</option><option value="plain">plain words</option><option value="csv">csv column</option><option value="ltwf">ltwf lessons json</option></select></label>
@@ -120,16 +118,14 @@ OpenRouter note: a plain model id (e.g. meta-llama/llama-3.3-70b-instruct) lets 
 </div>
 
 <div class="view" id="v-enrich">
-<div class="step"><h2>Annotate <span class="small">LLM annotators run in batches over the canonical words of a list</span></h2>
-<div class="prow"><label>list <select id="e_list" onchange="loadTable()"></select></label>
-<label><input type="checkbox" class="e_a" value="topic" checked> topic</label>
-<label><input type="checkbox" class="e_a" value="level"> cefr level</label>
-<label><input type="checkbox" class="e_a" value="concreteness"> concreteness</label>
-<label><input type="checkbox" class="e_a" value="pos"> pos (local)</label>
+<div class="step"><h2>Annotate <span class="small">the annotator set is a JSON you design; tick which to run over the list's canonical words</span></h2>
+<div class="prow"><label>list <select id="e_list" onchange="tableCache='';loadTable()"></select></label>
+<span id="e_checks"></span>
 <label>model <input type="text" list="modelcat" id="e_model" style="width:200px" placeholder="(gen model)"></label>
 <button class="pri" onclick="runAnnot()">run</button><span class="small" id="e_status"></span></div>
 <div class="prow"><label>export filtered as <input type="text" id="e_export" style="width:140px" placeholder="new list name"></label>
-<button onclick="exportList()">export</button><span class="small" id="e_exps"></span></div></div>
+<button onclick="exportList()">export</button><span class="small" id="e_exps"></span></div>
+<div id="annot_json"></div></div>
 <div id="e_tablewrap"></div>
 </div>
 
@@ -138,22 +134,24 @@ OpenRouter note: a plain model id (e.g. meta-llama/llama-3.3-70b-instruct) lets 
 <select id="t_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
 <span class="small">nothing here is saved to the catalog</span></div>
 <div id="steps"></div>
+<div class="step"><h2>Full pipeline config <span class="small">prompts, models and params as one JSON — the same object the workloads run on</span></h2><div id="pipe_json"></div></div>
 <div id="savebar"><button class="pri" onclick="saveSettings()">save pipeline</button><span class="small" id="s_status"></span></div>
 <datalist id="modelcat"></datalist>
 </div>
 
 <div class="view" id="v-workloads">
-<div class="step"><h2>New workload <span class="small">a controlled production run with the current saved pipeline</span></h2>
-<div class="prow"><label>name <input type="text" id="w_name" style="width:150px" placeholder="(auto)"></label>
-<label>criteria <input type="text" id="w_criteria" style="width:230px" placeholder="e.g. 90s animated classics"></label>
-<select id="w_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
-<label>titles <input type="text" id="w_n" value="15" style="width:42px"></label></div>
+<div class="step" id="wl_form"><h2>New workload <span class="small">batch job params + optional pipeline overrides in config{} — the JSON is what actually runs</span></h2>
+<div class="prow"><label>name <input type="text" data-w="name" style="width:150px" placeholder="(auto)"></label>
+<label>criteria <input type="text" data-w="criteria" style="width:230px" placeholder="e.g. 90s animated classics"></label>
+<select data-w="media_type" id="w_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
+<label>titles <input type="text" data-w="n" value="15" style="width:42px"></label></div>
 <div class="prow"><label><input type="checkbox" class="w_s" value="assess" checked> assess</label>
 <label><input type="checkbox" class="w_s" value="generate" checked> generate</label>
 <label><input type="checkbox" class="w_s" value="recall" checked> recall</label>
 <label><input type="checkbox" id="w_rej" checked> auto-reject</label>
-<label>stop after N tested <input type="text" id="w_target" style="width:42px" placeholder="all"></label>
-<button class="pri" onclick="createWl()">start workload</button></div></div>
+<label>stop after N tested <input type="text" data-w="target_tested" style="width:42px" placeholder="all"></label>
+<button class="pri" onclick="createWl()">start workload</button></div>
+<div id="wl_json"></div></div>
 <div id="wl_cards"></div>
 </div>
 
@@ -195,13 +193,6 @@ function showView(v){document.querySelectorAll(".tab").forEach(function(t){t.cla
   if(v==="sources")loadSources();if(v==="enrich")loadEnrich();if(v==="workloads")refreshWl(true);}
 
 var wlOpen=null, wlCache="", wlDetailCache="";
-function createWl(){
-  var steps=[];document.querySelectorAll(".w_s:checked").forEach(function(c){steps.push(c.value);});
-  j("/api/workloads",{name:document.getElementById("w_name").value,criteria:document.getElementById("w_criteria").value,
-    media_type:document.getElementById("w_media").value,n:+document.getElementById("w_n").value||15,steps:steps,
-    auto_reject:document.getElementById("w_rej").checked,target_tested:+document.getElementById("w_target").value||0}).then(function(d){
-    if(d.id){wlOpen=d.id;refreshWl(true);}});
-}
 function wlFromSelection(){
   var ids=Object.keys(sel).filter(function(k){return sel[k];});if(!ids.length)return;
   j("/api/workloads",{mode:"existing",ids:ids,name:"selection "+ids.length,steps:["assess","generate","recall"]}).then(function(d){
@@ -260,7 +251,7 @@ function srcPreview(preview){
       column:document.getElementById("src_col").value,content:srcContent,preview:preview}).then(function(d){
       if(d.error){out.innerHTML='<span class="err">'+esc(d.error)+'</span>';return;}
       out.textContent=preview?(d.count+" items: "+d.preview.join(", ")+(d.count>60?" …":"")):("saved '"+d.name+"' ("+d.count+")");
-      if(!preview){loadSources();modelsLoaded=modelsLoaded;j("/api/riddle_wordlists").then(function(w){WL=w;});}
+      if(!preview){loadSources();refreshWordlistSelects();}
     });
   }
   if(f&&!srcContent){var rd=new FileReader();rd.onload=function(){srcContent=rd.result;go();};rd.readAsText(f);}
@@ -324,40 +315,124 @@ function filterTable(){
   });
 }
 function runAnnot(){
-  var ann=[];document.querySelectorAll(".e_a:checked").forEach(function(c){ann.push(c.value);});
+  var ann=[];document.querySelectorAll("#e_checks .e_a:checked").forEach(function(c){ann.push(c.value);});
   j("/api/lex/annotate",{list:document.getElementById("e_list").value,annotators:ann,model:document.getElementById("e_model").value}).then(function(d){
     document.getElementById("e_status").textContent=d.error||"started";tableCache="";setTimeout(loadTable,1200);});
 }
 function exportList(){
   j("/api/lex/export",{list:document.getElementById("e_list").value,name:document.getElementById("e_export").value,filters:currentFilters()}).then(function(d){
     document.getElementById("e_exps").textContent=d.error||("saved '"+d.name+"' ("+d.count+" words)");
-    if(!d.error){j("/api/riddle_wordlists").then(function(w){WL=w;});}
+    if(!d.error){refreshWordlistSelects();}
   });
 }
-function testProvider(prov,btn){
-  btn.textContent="…";
-  j("/api/provider_test/"+prov,{}).then(function(d){
-    btn.textContent="test";
-    btn.insertAdjacentHTML("afterend",'<span class="small"> '+(d.ok?('<span class="ok">ok</span> '+d.seconds+"s · "+esc(d.model)):('<span class="err">'+esc(d.error)+'</span>'))+'</span>');
-  });
+var SHADOW={extra_params:{},openrouter_provider:{},annotators:{}};
+// jsonEditor: the box mirrors the inputs live on every 'input' event.
+// NOTE: if a heavy-firing input (range slider, color picker, contenteditable) ever lands
+// inside a watched container, debounce this listener or it will re-serialize per keystroke*n.
+function jsonEditor(mountId, opts){
+  var m=document.getElementById(mountId);
+  m.innerHTML='<textarea class="jbox" style="height:'+(opts.height||120)+'px;font:11.5px/1.4 ui-monospace,monospace;margin-top:8px"></textarea>'+
+    '<div class="prow"><button class="pri" data-e="apply">'+(opts.applyLabel||"apply & save")+'</button>'+
+    '<button data-e="export">export</button>'+
+    '<button data-e="preset">save as preset</button><select data-e="plist" style="min-width:110px"><option value="">presets…</option></select>'+
+    '<span class="small" data-e="st"></span></div>';
+  var box=m.querySelector(".jbox"), st=m.querySelector('[data-e="st"]'), plist=m.querySelector('[data-e="plist"]');
+  function sync(){try{box.value=JSON.stringify(opts.collect(),null,1);}catch(e){}}
+  function loadPresets(){j("/api/presets/"+opts.scope).then(function(ps){
+    plist.innerHTML='<option value="">presets…</option>';
+    Object.keys(ps).forEach(function(n){var o=document.createElement("option");o.textContent=n;plist.appendChild(o);});
+    plist.dataset.ps=JSON.stringify(ps);});}
+  (opts.watch||[]).forEach(function(sel){document.querySelectorAll(sel).forEach(function(el){el.addEventListener("input",sync);});});
+  m.querySelector('[data-e="apply"]').onclick=function(){
+    try{var obj=JSON.parse(box.value);}catch(e){st.textContent="invalid JSON: "+e.message;return;}
+    opts.apply(obj);sync();st.textContent="applied";setTimeout(function(){st.textContent="";},1500);};
+  m.querySelector('[data-e="export"]').onclick=function(){
+    var a=document.createElement("a");a.href=URL.createObjectURL(new Blob([box.value],{type:"application/json"}));a.download=(opts.filename||opts.scope)+".json";a.click();};
+  m.querySelector('[data-e="preset"]').onclick=function(){
+    var n=prompt("preset name");if(!n)return;
+    try{var v=JSON.parse(box.value);}catch(e){st.textContent="invalid JSON";return;}
+    j("/api/presets/"+opts.scope,{name:n,value:v}).then(loadPresets);};
+  plist.onchange=function(){
+    if(!plist.value)return;
+    var ps=JSON.parse(plist.dataset.ps||"{}");
+    box.value=JSON.stringify(ps[plist.value],null,1);plist.value="";st.textContent="preset loaded — hit apply";};
+  loadPresets();sync();
+  return {sync:sync,get:function(){return JSON.parse(box.value);}};
 }
-function cfgBox(mode){
-  var ta=document.getElementById("cfg_json"),ac=document.getElementById("cfg_actions");
-  ta.style.display="block";
-  if(mode==="export"){ta.value=JSON.stringify(S,null,1);ac.style.display="none";ta.select();}
-  else{ta.value="";ta.placeholder="paste a full config JSON here";ac.style.display="block";}
+var provEd=null, pipeEd=null, annotEd=null, wlEd=null;
+
+function provCollect(){
+  var c={llm_params:{}};
+  document.querySelectorAll("#prov_cfg [data-f]").forEach(function(el){c[el.dataset.f]=el.value;});
+  document.querySelectorAll("#prov_cfg [data-lp]").forEach(function(el){c.llm_params[el.dataset.lp]=el.value;});
+  c.max_tokens=+c.max_tokens||0;c.min_interval=+c.min_interval||1;c.temp=+c.temp||0.7;
+  c.extra_params=SHADOW.extra_params;c.openrouter_provider=SHADOW.openrouter_provider;
+  return c;
 }
-function cfgApply(){
-  try{var cfg=JSON.parse(document.getElementById("cfg_json").value);}
-  catch(e){document.getElementById("cfg_status").textContent="invalid JSON: "+e.message;return;}
-  j("/api/riddle_settings",cfg).then(function(s){S=s;document.getElementById("cfg_status").textContent="applied";fillFromSettings();buildDesign();});
+function provApply(o){
+  if("max_tokens" in o)document.querySelector('#prov_cfg [data-f="max_tokens"]').value=o.max_tokens||"";
+  if("temp" in o)document.querySelector('#prov_cfg [data-f="temp"]').value=o.temp;
+  if("min_interval" in o)document.querySelector('#prov_cfg [data-f="min_interval"]').value=o.min_interval;
+  Object.keys(o.llm_params||{}).forEach(function(k){var el=document.querySelector('#prov_cfg [data-lp="'+k+'"]');if(el)el.value=o.llm_params[k];});
+  SHADOW.extra_params=o.extra_params||{};SHADOW.openrouter_provider=o.openrouter_provider||{};
+  saveSettings();
+}
+function collectConfig(){
+  var cfg=provCollect();cfg.prompts={};
+  document.querySelectorAll("#steps [data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
+  document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
+  cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
+  cfg.annotators=SHADOW.annotators;
+  return cfg;
+}
+function pipeApply(o){
+  Object.keys(o.prompts||{}).forEach(function(k){var el=document.querySelector('#steps [data-pk="'+k+'"]');if(el)el.value=o.prompts[k];});
+  ["gen_model","guess_model","judge_model","wordlist","upto_lesson","k_attempts","max_violations"].forEach(function(k){
+    if(k in o){var el=document.querySelector('#steps [data-f="'+k+'"]');if(el)el.value=o[k];}});
+  provApply(o);
+}
+function saveSettings(){
+  j("/api/riddle_settings",collectConfig()).then(function(s){S=s;fillFromSettings();
+    ["s_status","p_status"].forEach(function(id){var el=document.getElementById(id);if(el){el.textContent="saved";setTimeout(function(){el.textContent="";},1500);}});});
 }
 function fillFromSettings(){
-  document.querySelector('[data-f="max_tokens"]').value=S.max_tokens||"";
-  document.querySelector('[data-f="min_interval"]').value=S.min_interval;
-  document.querySelector('[data-f="temp"]').value=S.temp;
+  document.querySelectorAll('[data-f="max_tokens"]').forEach(function(el){el.value=S.max_tokens||"";});
+  document.querySelectorAll('[data-f="min_interval"]').forEach(function(el){el.value=S.min_interval;});
+  document.querySelectorAll('[data-f="temp"]').forEach(function(el){el.value=S.temp;});
   Object.keys(S.llm_params||{}).forEach(function(k){var el=document.querySelector('[data-lp="'+k+'"]');if(el)el.value=S.llm_params[k];});
-  document.getElementById("extra_params").value=Object.keys(S.extra_params||{}).length?JSON.stringify(S.extra_params):"";
+  SHADOW.extra_params=S.extra_params||{};SHADOW.openrouter_provider=S.openrouter_provider||{};SHADOW.annotators=S.annotators||{};
+  buildAnnotChecks();
+  if(provEd)provEd.sync();if(pipeEd)pipeEd.sync();if(annotEd)annotEd.sync();
+}
+function buildAnnotChecks(){
+  var s=document.getElementById("e_checks");if(!s)return;
+  var prev={};s.querySelectorAll(".e_a").forEach(function(c){prev[c.value]=c.checked;});
+  s.innerHTML=Object.keys(SHADOW.annotators).map(function(a){
+    return '<label><input type="checkbox" class="e_a" value="'+esc(a)+'"'+(prev[a]?" checked":"")+'> '+esc(a)+(SHADOW.annotators[a].type==="pos"?" (local)":"")+'</label>';}).join(" ");
+}
+function loadCatalog(){
+  j("/api/lex/catalog").then(function(d){
+    var sel2=document.getElementById("cat_lang");sel2.innerHTML="";
+    d.groups.forEach(function(g,i){
+      var og=document.createElement("optgroup");og.label="group "+(i+1);
+      g.forEach(function(l){var o=document.createElement("option");o.textContent=l;og.appendChild(o);});
+      sel2.appendChild(og);
+    });
+    sel2.value="english";
+    function show(){
+      var items=d.catalog[sel2.value]||[];
+      document.getElementById("cat_list").innerHTML=items.length?items.map(function(it){
+        return '<div style="margin:3px 0"><b>'+esc(it.name)+'</b> ('+esc(it.size)+') — '+esc(it.desc)+(it.url?' · <a href="'+esc(it.url)+'" target="_blank">source</a>':"")+'</div>';}).join(""):"no stubbed references for this language yet";
+    }
+    sel2.onchange=show;show();
+  });
+}
+function refreshWordlistSelects(){
+  j("/api/riddle_wordlists").then(function(w){WL=w;
+    var ds=document.querySelector('#steps [data-f="wordlist"]');
+    if(ds){var cur=ds.value;ds.innerHTML="";Object.keys(WL).forEach(function(n){var o=document.createElement("option");o.textContent=n;ds.appendChild(o);});
+      ds.value=cur in WL?cur:(S.wordlist in WL?S.wordlist:Object.keys(WL)[0]);fillLessons(document.querySelector('#steps [data-f="upto_lesson"]').value);}
+  });
 }
 
 var STEPDEFS=[
@@ -395,25 +470,19 @@ function buildDesign(){
     document.getElementById("u_file").onchange=uploadList;}
   d.querySelectorAll("[data-try]").forEach(function(b){b.onclick=function(){tryStep(b.dataset.try);};});
 }
+function testProvider(prov,btn){
+  btn.textContent="…";
+  j("/api/provider_test/"+prov,{}).then(function(d){
+    btn.textContent="test";
+    btn.insertAdjacentHTML("afterend",'<span class="small"> '+(d.ok?('<span class="ok">ok</span> '+d.seconds+"s · "+esc(d.model)):('<span class="err">'+esc(d.error)+'</span>'))+'</span>');
+  });
+}
 function fillLessons(want){
   var d=document.getElementById("steps"), wl=d.querySelector('[data-f="wordlist"]').value, ls=WL[wl]||[], sel2=d.querySelector('[data-f="upto_lesson"]');
-  sel2.innerHTML="";ls.forEach(function(k){var o=document.createElement("option");o.textContent=k;sel2.appendChild(o);});
+  sel2.innerHTML="";
+  if(!ls.length){var o=document.createElement("option");o.textContent="(whole list)";o.value="";sel2.appendChild(o);return;}
+  ls.forEach(function(k){var o=document.createElement("option");o.textContent=k;sel2.appendChild(o);});
   sel2.value=(want&&ls.indexOf(want)>=0)?want:ls[ls.length-1]||"";
-}
-function collectConfig(){
-  var cfg={prompts:{},llm_params:{}};
-  document.querySelectorAll("[data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
-  document.querySelectorAll("[data-lp]").forEach(function(el){cfg.llm_params[el.dataset.lp]=el.value;});
-  document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
-  cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
-  cfg.max_tokens=+cfg.max_tokens||0;cfg.min_interval=+cfg.min_interval||1;cfg.temp=+cfg.temp||0.7;
-  var ep=document.getElementById("extra_params").value.trim();
-  try{cfg.extra_params=ep?JSON.parse(ep):{};}catch(e){cfg.extra_params=S.extra_params||{};alert("extra params JSON invalid, keeping previous");}
-  return cfg;
-}
-function saveSettings(){
-  j("/api/riddle_settings",collectConfig()).then(function(s){S=s;
-    ["s_status","p_status"].forEach(function(id){var el=document.getElementById(id);if(el){el.textContent="saved";setTimeout(function(){el.textContent="";},1500);}});});
 }
 function tryStep(step){
   var out=document.querySelector('[data-out="'+step+'"]');out.textContent="running…";
@@ -440,13 +509,11 @@ function uploadList(){
 }
 
 var modelSeen={};
-function addModelOpt(val,label){if(modelSeen[val])return;modelSeen[val]=1;var o=document.createElement("option");o.value=val;if(label)o.label=label;document.getElementById("modelcat").appendChild(o);}
+function addModelOpt(val){if(modelSeen[val])return;modelSeen[val]=1;var o=document.createElement("option");o.value=val;document.getElementById("modelcat").appendChild(o);}
 function loadModels(ks){
   document.getElementById("modelcat").innerHTML="";modelSeen={};
-  addModelOpt("openrouter/auto","openrouter picks a model");
-  j("/api/openrouter_models").then(function(d){
-    (d.models||[]).forEach(function(m){addModelOpt(m.id,(m.free?"free":("$"+m.prompt_per_m+"/"+m.completion_per_m+" per M"))+" · ctx "+(m.context||"?"));});
-  });
+  addModelOpt("openrouter/auto");
+  j("/api/openrouter_models").then(function(d){(d.models||[]).forEach(function(m){addModelOpt(m.id);});});
   Object.keys(ks).forEach(function(env){
     var k=ks[env];
     if(!k.set||k.provider==="openrouter")return;
@@ -471,7 +538,27 @@ function buildKeys(ks){
     var body={};body[b.dataset.clearkey]="";j("/api/riddle_keys",body).then(function(ks2){buildKeys(ks2);loadModels(ks2);});};});
 }
 function loadAll(){
-  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);fillFromSettings();});
+  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);fillFromSettings();loadCatalog();
+    provEd=jsonEditor("prov_json",{scope:"providers",collect:provCollect,apply:provApply,watch:["#prov_cfg"],height:150});
+    pipeEd=jsonEditor("pipe_json",{scope:"pipeline",collect:collectConfig,apply:pipeApply,watch:["#steps","#prov_cfg"],height:240,filename:"item_pipeline"});
+    annotEd=jsonEditor("annot_json",{scope:"annotators",collect:function(){return SHADOW.annotators;},apply:function(o){SHADOW.annotators=o;buildAnnotChecks();saveSettings();},height:170});
+    wlEd=jsonEditor("wl_json",{scope:"workload",collect:wlCollect,apply:wlApply,watch:["#wl_form"],applyLabel:"apply to form",height:150});
+    document.querySelectorAll(".w_s,#w_rej").forEach(function(c){c.addEventListener("change",function(){if(wlEd)wlEd.sync();});});
+  });
+}
+function wlCollect(){
+  var steps=[];document.querySelectorAll(".w_s:checked").forEach(function(c){steps.push(c.value);});
+  var g=function(k){var el=document.querySelector('#wl_form [data-w="'+k+'"]');return el?el.value:"";};
+  return {name:g("name"),mode:"discover",criteria:g("criteria"),media_type:g("media_type"),n:+g("n")||15,steps:steps,auto_reject:document.getElementById("w_rej").checked,target_tested:+g("target_tested")||0,config:{}};
+}
+function wlApply(o){
+  ["name","criteria","media_type","n","target_tested"].forEach(function(k){var el=document.querySelector('#wl_form [data-w="'+k+'"]');if(el&&k in o)el.value=o[k];});
+  document.querySelectorAll(".w_s").forEach(function(c){c.checked=(o.steps||[]).indexOf(c.value)>=0;});
+  if("auto_reject" in o)document.getElementById("w_rej").checked=!!o.auto_reject;
+}
+function createWl(){
+  var body;try{body=wlEd.get();}catch(e){body=wlCollect();}
+  j("/api/workloads",body).then(function(d){if(d.id){wlOpen=d.id;refreshWl(true);}});
 }
 function discover(){
   var st=document.getElementById("d_status");st.textContent=" · generating list…";

@@ -113,8 +113,10 @@ def openrouter_raw(api_key, temperature, max_retries=3, max_tokens=None, params=
         if not key: raise RuntimeError(f"no api key: set {provider['key_env']}")
         payload = {"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}
         if max_tokens: payload["max_tokens"] = int(max_tokens)
+        or_pref = (params or {}).get("__or_provider")
         for k, v in (params or {}).items():
-            if v not in (None, "", []): payload[k] = v
+            if k != "__or_provider" and v not in (None, "", []): payload[k] = v
+        if or_pref and provider is PROVIDERS["openrouter"]: payload["provider"] = or_pref
         backoff = 5.0
         for attempt in range(max_retries + 1):
             resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json=payload, timeout=120)
