@@ -106,14 +106,16 @@ def resolve_provider(model):
         return PROVIDERS[prov], slug
     return PROVIDERS["openrouter"], model
 
-def openrouter_raw(api_key, temperature, max_retries=3):
+def openrouter_raw(api_key, temperature, max_retries=3, max_tokens=None):
     def call(prompt, model):
         provider, slug = resolve_provider(model)
         key = os.environ.get(provider["key_env"], "") or api_key
         if not key: raise RuntimeError(f"no api key: set {provider['key_env']}")
+        payload = {"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}
+        if max_tokens: payload["max_tokens"] = int(max_tokens)
         backoff = 5.0
         for attempt in range(max_retries + 1):
-            resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json={"model": slug, "temperature": temperature, "messages": [{"role": "user", "content": prompt}]}, timeout=120)
+            resp = requests.post(provider["base_url"] + "/chat/completions", headers={"Authorization": f"Bearer {key}"}, json=payload, timeout=120)
             if resp.status_code in (500, 502, 503, 504) and attempt < max_retries:
                 wait = min(float(resp.headers.get("Retry-After", backoff)), 300)
                 _rlog(f"[backoff] {model}: http {resp.status_code}, sleeping {wait:.0f}s (attempt {attempt + 1}/{max_retries})")

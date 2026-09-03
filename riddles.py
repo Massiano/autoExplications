@@ -2,7 +2,7 @@ import os, json, time, threading, string, re, glob
 import pipeline
 
 DEFAULT_SETTINGS = {
-    "wordlist": "ltwf", "upto_lesson": "12H", "gen_model": "openai/gpt-4o-mini", "guess_model": "", "judge_model": "", "max_violations": 0, "k_attempts": 3, "min_interval": 1.0, "temp": 0.7,
+    "wordlist": "ltwf", "upto_lesson": "12H", "gen_model": "openai/gpt-4o-mini", "guess_model": "", "judge_model": "", "max_violations": 0, "k_attempts": 3, "min_interval": 1.0, "temp": 0.7, "max_tokens": 2000,
     "prompts": {
         "forbidden_prompt": "List the giveaway terms for the {media_type} '{title}': every word of the title, main character names, actor/author/creator names, iconic invented terms, and place names unique to it. Output ONLY a comma-separated list of lowercase single words (split multi-word names into their words). No explanations.",
         "retell_prompt": "Retell the {media_type} '{title}' as a riddle, without giving away which {media_type} it is. Every single word of your output must come from the allowed word list below. Do not use any forbidden word. Do not use the title or any names. Keep it short, 3 to 6 sentences, plot and feel, so someone who knows the {media_type} could guess it.\nForbidden words: {forbidden}\nAllowed words: {vocab_list}\nOutput only the riddle text.",
@@ -31,6 +31,18 @@ def _save(path, obj):
     tmp = path + ".tmp"
     with open(tmp, "w") as f: json.dump(obj, f, indent=1)
     os.replace(tmp, path)
+
+def apply_keys():
+    for env, val in _load(_p("_keys"), {}).items():
+        if val and env not in os.environ: os.environ[env] = val
+
+def key_status():
+    stored = _load(_p("_keys"), {})
+    out = {}
+    for name, p in pipeline.PROVIDERS.items():
+        env = p["key_env"]
+        out[env] = {"provider": name, "set": bool(os.environ.get(env) or stored.get(env)), "source": "env" if env in os.environ and env not in stored else ("saved" if stored.get(env) else "")}
+    return out
 
 def settings(): return {**DEFAULT_SETTINGS, **_load(_p("_settings"), {}), "prompts": {**DEFAULT_SETTINGS["prompts"], **_load(_p("_settings"), {}).get("prompts", {})}}
 
@@ -80,7 +92,7 @@ def strip_json(s):
     return m.group(0) if m else s
 
 def llm(temp, cfg):
-    return pipeline.make_rate_limited(pipeline.openrouter_raw(os.environ["OPENROUTER_API_KEY"], temp), float(cfg.get("min_interval", 1.0)))
+    return pipeline.make_rate_limited(pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), temp, max_tokens=cfg.get("max_tokens")), float(cfg.get("min_interval", 1.0)))
 
 def cfg_of(r):
     s = settings()
@@ -171,6 +183,23 @@ def register(app, exp_dir):
     from flask import request, jsonify, send_from_directory
     DIR = os.path.join(exp_dir, "_riddles")
     os.makedirs(DIR, exist_ok=True)
+    apply_keys()
+
+    @app.route("/api/riddle_keys", methods=["GET"])
+    def get_keys(): return jsonify(key_status())
+
+    @app.route("/api/riddle_keys", methods=["POST"])
+    def set_keys():
+        body = request.get_json(force=True)
+        stored = _load(_p("_keys"), {})
+        valid_envs = {p["key_env"] for p in pipeline.PROVIDERS.values()}
+        for env, val in body.items():
+            if env not in valid_envs: continue
+            val = (val or "").strip()
+            if val == "": stored.pop(env, None); os.environ.pop(env, None)
+            else: stored[env] = val; os.environ[env] = val
+        _save(_p("_keys"), stored)
+        return jsonify(key_status())
 
     @app.route("/riddles")
     def riddles_page(): return send_from_directory(".", "riddle_dashboard.html")

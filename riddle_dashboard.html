@@ -88,6 +88,12 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <select id="t_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
 <span class="small">nothing here is saved to the catalog</span></div>
 <div id="steps"></div>
+<div class="step" style="margin-top:14px">
+<h2>Providers &amp; limits <span class="small">model fields accept 'provider::model' (e.g. groq::llama-3.3-70b-versatile); plain names go via OpenRouter</span></h2>
+<div class="prow"><label>max_tokens per call <input type="text" data-f="max_tokens" style="width:70px"></label>
+<label>min seconds between calls <input type="text" data-f="min_interval" style="width:56px"></label></div>
+<div id="keys"></div>
+</div>
 <div id="savebar"><button class="pri" onclick="saveSettings()">save pipeline</button><span class="small" id="s_status"></span></div>
 </div>
 
@@ -168,9 +174,10 @@ function fillLessons(want){
 }
 function collectConfig(){
   var cfg={prompts:{}};
-  document.querySelectorAll("#steps [data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
+  document.querySelectorAll("#v-design [data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
   document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
   cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
+  cfg.max_tokens=+cfg.max_tokens||0;cfg.min_interval=+cfg.min_interval||1;
   return cfg;
 }
 function saveSettings(){
@@ -201,8 +208,24 @@ function uploadList(){
   rd.readAsText(f);
 }
 
+function buildKeys(ks){
+  var d=document.getElementById("keys");d.innerHTML="";
+  Object.keys(ks).forEach(function(env){
+    var k=ks[env];
+    d.insertAdjacentHTML("beforeend",'<div class="prow"><label style="width:110px">'+esc(k.provider)+'</label>'+
+      '<input type="password" data-key="'+esc(env)+'" placeholder="'+(k.set?("••• key "+(k.source||"set")):"no key")+'" style="width:280px">'+
+      '<button data-savekey="'+esc(env)+'">'+(k.set?"replace":"set")+'</button>'+(k.source==="saved"?'<button data-clearkey="'+esc(env)+'" class="ghost">clear</button>':"")+'</div>');
+  });
+  d.querySelectorAll("[data-savekey]").forEach(function(b){b.onclick=function(){
+    var env=b.dataset.savekey,val=d.querySelector('[data-key="'+env+'"]').value;
+    if(!val)return;var body={};body[env]=val;j("/api/riddle_keys",body).then(buildKeys);};});
+  d.querySelectorAll("[data-clearkey]").forEach(function(b){b.onclick=function(){
+    var body={};body[b.dataset.clearkey]="";j("/api/riddle_keys",body).then(buildKeys);};});
+}
 function loadAll(){
-  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists")]).then(function(a){S=a[0];WL=a[1];buildDesign();});
+  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);
+    document.querySelector('[data-f="max_tokens"]').value=S.max_tokens||"";
+    document.querySelector('[data-f="min_interval"]').value=S.min_interval;});
 }
 function discover(){
   var st=document.getElementById("d_status");st.textContent=" · generating list…";
