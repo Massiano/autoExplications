@@ -22,7 +22,8 @@ textarea { width: 100%; resize: vertical; }
 .pill { border: 1px solid #ddd9cd; border-radius: 20px; padding: 2px 11px; font-size: 12.5px; cursor: pointer; background: #fff; color: #777161; }
 .pill.on { background: #2a2a26; color: #fff; border-color: #2a2a26; }
 #addrow { display: flex; gap: 8px; margin-bottom: 18px; }
-#addrow input { flex: 1; }
+#addrow input[type=text]:first-child { flex: 1; }
+.frow2 { display: flex; }
 .card { background: #fff; border: 1px solid #e6e2d6; border-radius: 10px; margin-bottom: 10px; overflow: hidden; }
 .chead { display: flex; align-items: center; gap: 9px; padding: 10px 12px; cursor: pointer; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
@@ -64,8 +65,16 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <div id="wrap">
 <div id="topbar"><h1>Riddles</h1><span class="small" id="counts"></span><span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">pipeline</button><button onclick="togglePanel()">settings</button></div>
 <div id="addrow">
-<input type="text" id="a_title" placeholder="Title, e.g. Finding Nemo" onkeydown="if(event.key==='Enter')addRiddle(true)">
+<input type="text" id="d_criteria" placeholder="criteria, e.g. animated classics of the 90s (optional)" onkeydown="if(event.key==='Enter')discover()">
 <select id="a_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
+<input type="text" id="d_n" value="15" style="width:52px" title="how many">
+<button class="pri" onclick="discover()">discover + assess</button>
+</div>
+<div class="small" style="margin:-12px 0 16px 2px"><label><input type="checkbox" id="d_rej" checked> auto-reject poor/flagged</label>
+&nbsp; <a href="#" onclick="var r=document.getElementById('singlerow');r.style.display=r.style.display==='none'?'flex':'none';return false">add single title</a>
+<span id="d_status"></span></div>
+<div id="singlerow" style="display:none;gap:8px;margin:-8px 0 16px" class="frow2">
+<input type="text" id="a_title" placeholder="Title" style="flex:1" onkeydown="if(event.key==='Enter')addRiddle(true)">
 <button onclick="addRiddle(false)">add draft</button>
 <button class="pri" onclick="addRiddle(true)">add + auto-run</button>
 </div>
@@ -139,6 +148,25 @@ document.getElementById("u_file").onchange=function(){
 };
 function togglePanel(){document.getElementById("panel").classList.toggle("on");}
 
+function discover(){
+  var st=document.getElementById("d_status");st.textContent=" · generating list…";
+  j("/api/riddles/discover",{criteria:document.getElementById("d_criteria").value,media_type:document.getElementById("a_media").value,
+    n:+document.getElementById("d_n").value||15,auto_reject:document.getElementById("d_rej").checked}).then(function(d){
+    st.textContent=d.error?(" · error: "+d.error):(" · "+d.created.length+" new"+(d.skipped?", "+d.skipped+" known":"")+", assessing…");
+    refresh(true);pollAll();
+  });
+}
+var pollingAll=false;
+function pollAll(){
+  if(pollingAll)return;pollingAll=true;
+  (function tick(){
+    fetch("/api/riddles").then(function(r){return r.json();}).then(function(list){
+      listCache="";render(list);
+      if(list.some(function(r){return r.busy;}))setTimeout(tick,2000);
+      else{pollingAll=false;document.getElementById("d_status").textContent="";}
+    });
+  })();
+}
 function addRiddle(auto){
   var t=document.getElementById("a_title").value.trim();if(!t)return;
   j("/api/riddles",{title:t,media_type:document.getElementById("a_media").value,steps:auto?["assess","generate","recall"]:[]}).then(function(){

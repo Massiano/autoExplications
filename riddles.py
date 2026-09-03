@@ -8,6 +8,7 @@ DEFAULT_SETTINGS = {
         "retell_prompt": "Retell the {media_type} '{title}' as a riddle, without giving away which {media_type} it is. Every single word of your output must come from the allowed word list below. Do not use any forbidden word. Do not use the title or any names. Keep it short, 3 to 6 sentences, plot and feel, so someone who knows the {media_type} could guess it.\nForbidden words: {forbidden}\nAllowed words: {vocab_list}\nOutput only the riddle text.",
         "recall_prompt": "This is a riddle describing a {media_type}. Which {media_type} is it? Text: '{text}'. Respond with ONLY the title, nothing else.",
         "recall_judge_prompt": "Target {media_type}: '{title}'. A reader guessed: '{guess}'. Is that the same {media_type} (ignore subtitles, articles, translations)? Answer exactly one word: yes or no.",
+        "discover_prompt": "List {n} {media_type}s for a guessing game aimed at adult foreign-language learners: widely known internationally, family-friendly, with plots that can be retold in very simple words. {criteria}\nOutput ONLY one title per line. No numbering, no years, no explanations.",
         "suitability_prompt": "Assess the {media_type} '{title}' as material for a vocabulary-limited guessing riddle aimed at adult foreign-language learners. Respond ONLY with a JSON object, no markdown fences, with keys: popularity (1-5, how widely known globally), content_ok (true/false, false if sexual/graphic-violence/otherwise inappropriate for a general learning app), content_note (short string), retellability (1-5, how well the plot can be conveyed in very simple concrete words), retell_note (short string), verdict (one of: good, ok, poor).",
     },
 }
@@ -250,6 +251,40 @@ def register(app, exp_dir):
         BUSY[rid] = steps[0]
         threading.Thread(target=run_steps, args=(rid, steps), daemon=True).start()
         return jsonify({"running": steps})
+
+    @app.route("/api/riddles/discover", methods=["POST"])
+    def rdiscover():
+        body = request.get_json(force=True)
+        s = settings()
+        media = body.get("media_type", "movie")
+        n = min(int(body.get("n", 15)), 50)
+        prompt = s["prompts"]["discover_prompt"].format(n=n, media_type=media, criteria=body.get("criteria", "").strip())
+        try: raw = llm(0.8, s)(prompt, s["gen_model"])
+        except Exception as e: return jsonify({"error": str(e)}), 502
+        titles = []
+        for line in raw.splitlines():
+            t = re.sub(r"^\s*[\d\.\)\-\*]+\s*", "", line).strip().strip('"').strip()
+            t = re.sub(r"\s*\(\d{4}\)\s*$", "", t)
+            if t and len(t) < 90 and not t.lower().startswith(("here", "sure", "these")): titles.append(t)
+        existing = {r["title"].casefold() for r in list_riddles()}
+        created = []
+        for t in titles:
+            if t.casefold() in existing: continue
+            existing.add(t.casefold())
+            rid = time.strftime("r_%Y%m%d_%H%M%S_") + re.sub(r"\W+", "", t.lower())[:24] + f"_{len(created)}"
+            r = {"id": rid, "title": t, "media_type": media, "status": "draft", "text": "", "created": time.strftime("%Y-%m-%d %H:%M:%S"), "config": {}, "learner_words": [], "extra_forbidden": [], "forbidden": [], "attempts": [], "log": [f"{time.strftime('%H:%M:%S')} discovered"], "suitability": None, "validation": None, "recall": None}
+            save_riddle(r); created.append(rid)
+        auto_reject = bool(body.get("auto_reject", True))
+        if body.get("assess", True) and created:
+            def work():
+                for rid in created:
+                    run_steps(rid, ["assess"])
+                    r = load_riddle(rid)
+                    su = r.get("suitability") or {}
+                    if auto_reject and (su.get("verdict") == "poor" or su.get("content_ok") is False):
+                        r["status"] = "rejected"; log(r, "auto-rejected by assessment"); save_riddle(r)
+            threading.Thread(target=work, daemon=True).start()
+        return jsonify({"created": created, "skipped": len(titles) - len(created)})
 
     @app.route("/api/riddles/batch", methods=["POST"])
     def rbatch():
