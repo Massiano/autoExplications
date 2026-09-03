@@ -95,6 +95,7 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 <div id="keys"></div>
 </div>
 <div id="savebar"><button class="pri" onclick="saveSettings()">save pipeline</button><span class="small" id="s_status"></span></div>
+<datalist id="modelcat"></datalist>
 </div>
 
 <div class="view" id="v-catalog">
@@ -141,7 +142,7 @@ var STEPDEFS=[
  {id:"recall",name:"6 · Recall test",desc:"a cold model must guess the title back; judge settles near-misses",pk:"recall_prompt",params:"guess judge",pk2:"recall_judge_prompt"},
 ];
 
-function modelInput(id,val,ph){return '<label>model <input type="text" data-f="'+id+'" value="'+esc(val)+'" placeholder="'+(ph||"")+'" style="width:210px"></label>';}
+function modelInput(id,val,ph){return '<label>model <input type="text" list="modelcat" data-f="'+id+'" value="'+esc(val)+'" placeholder="'+(ph||"")+'" style="width:230px"></label>';}
 function buildDesign(){
   var d=document.getElementById("steps");d.innerHTML="";
   STEPDEFS.forEach(function(sd){
@@ -208,6 +209,25 @@ function uploadList(){
   rd.readAsText(f);
 }
 
+var modelsLoaded=false;
+function loadModels(ks){
+  if(modelsLoaded)return;modelsLoaded=true;
+  var dl=document.getElementById("modelcat");
+  j("/api/openrouter_models").then(function(d){
+    (d.models||[]).forEach(function(m){
+      var o=document.createElement("option");o.value=m.id;
+      o.label=(m.free?"free":("$"+m.prompt_per_m+"/"+m.completion_per_m+" per M"))+" · ctx "+(m.context||"?");
+      dl.appendChild(o);
+    });
+  });
+  Object.keys(ks).forEach(function(env){
+    var k=ks[env];
+    if(!k.set||k.provider==="openrouter")return;
+    j("/api/provider_models/"+k.provider).then(function(d){
+      (d.ids||[]).forEach(function(id){var o=document.createElement("option");o.value=k.provider+"::"+id;dl.appendChild(o);});
+    });
+  });
+}
 function buildKeys(ks){
   var d=document.getElementById("keys");d.innerHTML="";
   Object.keys(ks).forEach(function(env){
@@ -218,12 +238,15 @@ function buildKeys(ks){
   });
   d.querySelectorAll("[data-savekey]").forEach(function(b){b.onclick=function(){
     var env=b.dataset.savekey,val=d.querySelector('[data-key="'+env+'"]').value;
-    if(!val)return;var body={};body[env]=val;j("/api/riddle_keys",body).then(buildKeys);};});
+    if(!val)return;var body={};body[env]=val;j("/api/riddle_keys",body).then(function(ks2){buildKeys(ks2);
+      var prov=ks2[env]&&ks2[env].provider;
+      if(prov&&prov!=="openrouter")j("/api/provider_models/"+prov).then(function(d){var dl=document.getElementById("modelcat");
+        (d.ids||[]).forEach(function(id){var o=document.createElement("option");o.value=prov+"::"+id;dl.appendChild(o);});});});};});
   d.querySelectorAll("[data-clearkey]").forEach(function(b){b.onclick=function(){
     var body={};body[b.dataset.clearkey]="";j("/api/riddle_keys",body).then(buildKeys);};});
 }
 function loadAll(){
-  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);
+  Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);
     document.querySelector('[data-f="max_tokens"]').value=S.max_tokens||"";
     document.querySelector('[data-f="min_interval"]').value=S.min_interval;});
 }
