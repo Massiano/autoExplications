@@ -78,22 +78,59 @@ pre.log { font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; backgro
 </head>
 <body>
 <div id="wrap">
-<div id="topbar"><h1>Riddles</h1>
-<span class="tab" data-v="design" onclick="showView('design')">Pipeline design</span>
+<div id="topbar"><h1>Studio</h1>
+<span class="tab" data-v="providers" onclick="showView('providers')">Providers</span>
+<span class="tab" data-v="sources" onclick="showView('sources')">Sources</span>
+<span class="tab" data-v="enrich" onclick="showView('enrich')">Enrichment</span>
+<span class="tab" data-v="design" onclick="showView('design')">Riddle pipeline</span>
 <span class="tab" data-v="catalog" onclick="showView('catalog')">Catalog <span class="small" id="counts"></span></span>
-<span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">explication pipeline</button></div>
+<span style="margin-left:auto"></span><button class="ghost" onclick="location.href='/'">explications</button></div>
+
+<div class="view" id="v-providers">
+<div class="step"><h2>API keys <span class="small">values are never displayed; env vars beat saved keys</span></h2><div id="keys"></div></div>
+<div class="step"><h2>Cross-model parameters <span class="small">sent with every call where the provider supports them; blank = provider default</span></h2>
+<div class="prow"><label>max_tokens <input type="text" data-f="max_tokens" style="width:64px"></label>
+<label>temperature <input type="text" data-f="temp" style="width:50px"></label>
+<label>top_p <input type="text" data-lp="top_p" style="width:50px"></label>
+<label>freq_penalty <input type="text" data-lp="frequency_penalty" style="width:50px"></label>
+<label>pres_penalty <input type="text" data-lp="presence_penalty" style="width:50px"></label></div>
+<div class="prow"><label>seed <input type="text" data-lp="seed" style="width:70px"></label>
+<label>stop (comma sep) <input type="text" data-lp="stop" style="width:120px"></label>
+<label>max_retries <input type="text" data-lp="max_retries" style="width:44px"></label>
+<label>min s between calls <input type="text" data-f="min_interval" style="width:50px"></label></div>
+<div style="margin-top:8px"><button class="pri" onclick="saveSettings()">save</button> <span class="small" id="p_status"></span></div></div>
+</div>
+
+<div class="view" id="v-sources">
+<div class="step"><h2>Load a source <span class="small">every database/CSV is distinct — pick the loader, preview, then save</span></h2>
+<div class="prow"><label>name <input type="text" id="src_name" style="width:140px"></label>
+<label>loader <select id="src_loader"><option value="auto">auto</option><option value="plain">plain words</option><option value="csv">csv column</option><option value="ltwf">ltwf lessons json</option></select></label>
+<label id="src_colwrap" style="display:none">column <input type="text" id="src_col" style="width:90px" placeholder="name or index"></label>
+<input type="file" id="src_file" style="font-size:12px">
+<button onclick="srcPreview(true)">preview</button><button class="pri" onclick="srcPreview(false)">save source</button></div>
+<div class="tryout" id="src_out"></div></div>
+<div id="src_list"></div>
+</div>
+
+<div class="view" id="v-enrich">
+<div class="step"><h2>Annotate <span class="small">LLM annotators run in batches over the canonical words of a list</span></h2>
+<div class="prow"><label>list <select id="e_list" onchange="loadTable()"></select></label>
+<label><input type="checkbox" class="e_a" value="topic" checked> topic</label>
+<label><input type="checkbox" class="e_a" value="level"> cefr level</label>
+<label><input type="checkbox" class="e_a" value="concreteness"> concreteness</label>
+<label><input type="checkbox" class="e_a" value="pos"> pos (local)</label>
+<label>model <input type="text" list="modelcat" id="e_model" style="width:200px" placeholder="(gen model)"></label>
+<button class="pri" onclick="runAnnot()">run</button><span class="small" id="e_status"></span></div>
+<div class="prow"><label>export filtered as <input type="text" id="e_export" style="width:140px" placeholder="new list name"></label>
+<button onclick="exportList()">export</button><span class="small" id="e_exps"></span></div></div>
+<div id="e_tablewrap"></div>
+</div>
 
 <div class="view" id="v-design">
 <div id="scratch">try steps against: <input type="text" id="t_title" value="Finding Nemo" style="width:200px">
 <select id="t_media"><option>movie</option><option>book</option><option>series</option><option>song</option><option>concept</option></select>
 <span class="small">nothing here is saved to the catalog</span></div>
 <div id="steps"></div>
-<div class="step" style="margin-top:14px">
-<h2>Providers &amp; limits <span class="small">model fields accept 'provider::model' (e.g. groq::llama-3.3-70b-versatile); plain names go via OpenRouter</span></h2>
-<div class="prow"><label>max_tokens per call <input type="text" data-f="max_tokens" style="width:70px"></label>
-<label>min seconds between calls <input type="text" data-f="min_interval" style="width:56px"></label></div>
-<div id="keys"></div>
-</div>
 <div id="savebar"><button class="pri" onclick="saveSettings()">save pipeline</button><span class="small" id="s_status"></span></div>
 <datalist id="modelcat"></datalist>
 </div>
@@ -131,7 +168,100 @@ var S=null, WL={}, sel={}, filt=null, openId=null, listCache="", riddleCache={};
 function esc(s){var d=document.createElement("div");d.textContent=s==null?"":s;return d.innerHTML;}
 function j(u,body){return fetch(u,body?{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}:undefined).then(function(r){return r.json();});}
 function showView(v){document.querySelectorAll(".tab").forEach(function(t){t.classList.toggle("on",t.dataset.v===v);});
-  document.getElementById("v-design").classList.toggle("on",v==="design");document.getElementById("v-catalog").classList.toggle("on",v==="catalog");}
+  ["providers","sources","enrich","design","catalog"].forEach(function(x){document.getElementById("v-"+x).classList.toggle("on",x===v);});
+  if(v==="sources")loadSources();if(v==="enrich")loadEnrich();}
+
+function srcLoaderChanged(){document.getElementById("src_colwrap").style.display=document.getElementById("src_loader").value==="csv"?"":"none";}
+var srcContent="";
+function srcPreview(preview){
+  var out=document.getElementById("src_out");
+  var f=document.getElementById("src_file").files[0];
+  function go(){
+    j("/api/lex/sources",{name:document.getElementById("src_name").value||(f?f.name.replace(/\.\w+$/,""):""),loader:document.getElementById("src_loader").value,
+      column:document.getElementById("src_col").value,content:srcContent,preview:preview}).then(function(d){
+      if(d.error){out.innerHTML='<span class="err">'+esc(d.error)+'</span>';return;}
+      out.textContent=preview?(d.count+" items: "+d.preview.join(", ")+(d.count>60?" …":"")):("saved '"+d.name+"' ("+d.count+")");
+      if(!preview){loadSources();modelsLoaded=modelsLoaded;j("/api/riddle_wordlists").then(function(w){WL=w;});}
+    });
+  }
+  if(f&&!srcContent){var rd=new FileReader();rd.onload=function(){srcContent=rd.result;go();};rd.readAsText(f);}
+  else if(srcContent)go();else out.innerHTML='<span class="err">choose a file first</span>';
+}
+document.addEventListener("change",function(e){if(e.target.id==="src_file"){srcContent="";}if(e.target.id==="src_loader")srcLoaderChanged();});
+function loadSources(){
+  j("/api/lex/sources").then(function(list){
+    var d=document.getElementById("src_list");d.innerHTML="";
+    list.forEach(function(s){
+      d.insertAdjacentHTML("beforeend",'<div class="step"><h2>'+esc(s.name)+' <span class="small">'+esc(s.origin)+' · '+s.words+' words'+(s.lessons?' · '+s.lessons+' lessons':'')+' · '+s.annotated+' annotated'+(s.busy?' · <span class="busy">annotating '+s.busy.done+"/"+s.busy.total+'</span>':'')+'</span><span style="margin-left:auto"></span>'+
+        '<button onclick="showView(\'enrich\');document.getElementById(\'e_list\').value=\''+esc(s.name)+'\';loadTable()">open</button>'+
+        (s.origin==="uploaded"?'<button class="ghost" onclick="if(confirm(\'delete source and its annotations?\'))j(\'/api/lex/sources/'+esc(s.name)+'/delete\',{}).then(loadSources)">delete</button>':"")+'</h2></div>');
+    });
+  });
+}
+function loadEnrich(){
+  j("/api/lex/sources").then(function(list){
+    var sel2=document.getElementById("e_list"),cur=sel2.value;sel2.innerHTML="";
+    list.forEach(function(s){var o=document.createElement("option");o.textContent=s.name;sel2.appendChild(o);});
+    if(cur)sel2.value=cur;
+    loadTable();
+  });
+}
+var tableCache="";
+function loadTable(){
+  var name=document.getElementById("e_list").value;if(!name)return;
+  fetch("/api/lex/table/"+name).then(function(r){return r.text();}).then(function(txt){
+    if(txt===tableCache)return;tableCache=txt;
+    var d=JSON.parse(txt), wrap=document.getElementById("e_tablewrap");
+    var cols=["word"].concat(d.cols);
+    var h='<div class="step" style="padding:8px"><table style="width:100%;border-collapse:collapse;font-size:13px"><tr>'+cols.map(function(c){
+      return '<th style="text-align:left;padding:3px 8px 6px 3px">'+esc(c)+'<br><input type="text" data-fc="'+esc(c)+'" style="width:90%;font-size:12px;padding:2px 5px" oninput="filterTable()"></th>';}).join("")+'</tr>';
+    d.rows.forEach(function(r,i){
+      h+='<tr data-row="'+i+'" style="border-top:1px solid #eee9dd"><td style="padding:2px 8px 2px 3px">'+esc(r.word)+'</td>'+
+        d.cols.map(function(c){return '<td contenteditable data-w="'+esc(r.word)+'" data-c="'+esc(c)+'" style="padding:2px 8px">'+esc(r.annot[c]===undefined?"":r.annot[c])+'</td>';}).join("")+'</tr>';
+    });
+    h+='</table>'+(d.rows.length>400?'<div class="small">'+d.rows.length+' rows</div>':"")+'</div>';
+    wrap.innerHTML=h;
+    if(d.busy){document.getElementById("e_status").innerHTML='<span class="busy">'+d.busy.done+"/"+d.busy.total+(d.busy.error?" · "+esc(d.busy.error):"")+"</span>";setTimeout(function(){tableCache="";loadTable();},2500);}
+    else document.getElementById("e_status").textContent="";
+    wrap.querySelectorAll("[contenteditable]").forEach(function(td){
+      td.onblur=function(){var s2={};s2[td.dataset.w]={};s2[td.dataset.w][td.dataset.c]=td.textContent.trim();
+        j("/api/lex/annot/"+document.getElementById("e_list").value,{set:s2});};
+    });
+    filterTable();
+  });
+}
+function currentFilters(){
+  var fs=[];document.querySelectorAll("#e_tablewrap [data-fc]").forEach(function(inp){
+    if(inp.value.trim())fs.push({col:inp.dataset.fc,op:"contains",val:inp.value.trim()});});
+  return fs;
+}
+function filterTable(){
+  var fs=currentFilters();
+  document.querySelectorAll("#e_tablewrap [data-row]").forEach(function(tr){
+    var show=fs.every(function(f){
+      var td=f.col==="word"?tr.children[0]:tr.querySelector('[data-c="'+f.col+'"]');
+      return td&&td.textContent.toLowerCase().indexOf(f.val.toLowerCase())>=0;});
+    tr.style.display=show?"":"none";
+  });
+}
+function runAnnot(){
+  var ann=[];document.querySelectorAll(".e_a:checked").forEach(function(c){ann.push(c.value);});
+  j("/api/lex/annotate",{list:document.getElementById("e_list").value,annotators:ann,model:document.getElementById("e_model").value}).then(function(d){
+    document.getElementById("e_status").textContent=d.error||"started";tableCache="";setTimeout(loadTable,1200);});
+}
+function exportList(){
+  j("/api/lex/export",{list:document.getElementById("e_list").value,name:document.getElementById("e_export").value,filters:currentFilters()}).then(function(d){
+    document.getElementById("e_exps").textContent=d.error||("saved '"+d.name+"' ("+d.count+" words)");
+    if(!d.error){j("/api/riddle_wordlists").then(function(w){WL=w;});}
+  });
+}
+function testProvider(prov,btn){
+  btn.textContent="…";
+  j("/api/provider_test/"+prov,{}).then(function(d){
+    btn.textContent="test";
+    btn.insertAdjacentHTML("afterend",'<span class="small"> '+(d.ok?('<span class="ok">ok</span> '+d.seconds+"s"):('<span class="err">'+esc(d.error)+'</span>'))+'</span>');
+  });
+}
 
 var STEPDEFS=[
  {id:"discover",name:"1 · Discover",desc:"generate candidate titles from criteria",pk:"discover_prompt",params:"gen"},
@@ -174,16 +304,17 @@ function fillLessons(want){
   sel2.value=(want&&ls.indexOf(want)>=0)?want:ls[ls.length-1]||"";
 }
 function collectConfig(){
-  var cfg={prompts:{}};
-  document.querySelectorAll("#v-design [data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
+  var cfg={prompts:{},llm_params:{}};
+  document.querySelectorAll("[data-f]").forEach(function(el){cfg[el.dataset.f]=el.value;});
+  document.querySelectorAll("[data-lp]").forEach(function(el){cfg.llm_params[el.dataset.lp]=el.value;});
   document.querySelectorAll("#steps [data-pk]").forEach(function(el){cfg.prompts[el.dataset.pk]=el.value;});
   cfg.k_attempts=+cfg.k_attempts||3;cfg.max_violations=+cfg.max_violations||0;
-  cfg.max_tokens=+cfg.max_tokens||0;cfg.min_interval=+cfg.min_interval||1;
+  cfg.max_tokens=+cfg.max_tokens||0;cfg.min_interval=+cfg.min_interval||1;cfg.temp=+cfg.temp||0.7;
   return cfg;
 }
 function saveSettings(){
   j("/api/riddle_settings",collectConfig()).then(function(s){S=s;
-    document.getElementById("s_status").textContent="saved";setTimeout(function(){document.getElementById("s_status").textContent="";},1500);});
+    ["s_status","p_status"].forEach(function(id){var el=document.getElementById(id);if(el){el.textContent="saved";setTimeout(function(){el.textContent="";},1500);}});});
 }
 function tryStep(step){
   var out=document.querySelector('[data-out="'+step+'"]');out.textContent="running…";
@@ -234,7 +365,8 @@ function buildKeys(ks){
     var k=ks[env];
     d.insertAdjacentHTML("beforeend",'<div class="prow"><label style="width:110px">'+esc(k.provider)+'</label>'+
       '<input type="password" data-key="'+esc(env)+'" placeholder="'+(k.set?("••• key "+(k.source||"set")):"no key")+'" style="width:280px">'+
-      '<button data-savekey="'+esc(env)+'">'+(k.set?"replace":"set")+'</button>'+(k.source==="saved"?'<button data-clearkey="'+esc(env)+'" class="ghost">clear</button>':"")+'</div>');
+      '<button data-savekey="'+esc(env)+'">'+(k.set?"replace":"set")+'</button>'+(k.source==="saved"?'<button data-clearkey="'+esc(env)+'" class="ghost">clear</button>':"")+
+      (k.set?'<button onclick="testProvider(\''+esc(k.provider)+'\',this)">test</button>':"")+'</div>');
   });
   d.querySelectorAll("[data-savekey]").forEach(function(b){b.onclick=function(){
     var env=b.dataset.savekey,val=d.querySelector('[data-key="'+env+'"]').value;
@@ -248,7 +380,9 @@ function buildKeys(ks){
 function loadAll(){
   Promise.all([j("/api/riddle_settings"),j("/api/riddle_wordlists"),j("/api/riddle_keys")]).then(function(a){S=a[0];WL=a[1];buildDesign();buildKeys(a[2]);loadModels(a[2]);
     document.querySelector('[data-f="max_tokens"]').value=S.max_tokens||"";
-    document.querySelector('[data-f="min_interval"]').value=S.min_interval;});
+    document.querySelector('[data-f="min_interval"]').value=S.min_interval;
+    document.querySelector('[data-f="temp"]').value=S.temp;
+    Object.keys(S.llm_params||{}).forEach(function(k){var el=document.querySelector('[data-lp="'+k+'"]');if(el)el.value=S.llm_params[k];});});
 }
 function discover(){
   var st=document.getElementById("d_status");st.textContent=" · generating list…";

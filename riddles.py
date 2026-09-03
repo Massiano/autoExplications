@@ -3,12 +3,16 @@ import pipeline
 
 DEFAULT_SETTINGS = {
     "wordlist": "ltwf", "upto_lesson": "12H", "gen_model": "openai/gpt-4o-mini", "guess_model": "", "judge_model": "", "max_violations": 0, "k_attempts": 3, "min_interval": 1.0, "temp": 0.7, "max_tokens": 2000,
+    "llm_params": {"top_p": "", "frequency_penalty": "", "presence_penalty": "", "seed": "", "stop": "", "max_retries": 3, "timeout": 120},
     "prompts": {
         "forbidden_prompt": "List the giveaway terms for the {media_type} '{title}': every word of the title, main character names, actor/author/creator names, iconic invented terms, and place names unique to it. Output ONLY a comma-separated list of lowercase single words (split multi-word names into their words). No explanations.",
         "retell_prompt": "Retell the {media_type} '{title}' as a riddle, without giving away which {media_type} it is. Every single word of your output must come from the allowed word list below. Do not use any forbidden word. Do not use the title or any names. Keep it short, 3 to 6 sentences, plot and feel, so someone who knows the {media_type} could guess it.\nForbidden words: {forbidden}\nAllowed words: {vocab_list}\nOutput only the riddle text.",
         "recall_prompt": "This is a riddle describing a {media_type}. Which {media_type} is it? Text: '{text}'. Respond with ONLY the title, nothing else.",
         "recall_judge_prompt": "Target {media_type}: '{title}'. A reader guessed: '{guess}'. Is that the same {media_type} (ignore subtitles, articles, translations)? Answer exactly one word: yes or no.",
         "discover_prompt": "List {n} {media_type}s for a guessing game aimed at adult foreign-language learners: widely known internationally, family-friendly, with plots that can be retold in very simple words. {criteria}\nOutput ONLY one title per line. No numbering, no years, no explanations.",
+        "annot_topic_prompt": "Assign each word exactly ONE broad thematic topic label (lowercase, one word or hyphenated, e.g. food, family, travel, body, work, nature, emotion, time, number, function-word). Words: {words}\nRespond ONLY with a JSON object mapping each word to its topic. No fences, no comments.",
+        "annot_level_prompt": "Estimate the CEFR level (A1, A2, B1, B2, C1, C2) at which a foreign learner of English typically acquires each word. Words: {words}\nRespond ONLY with a JSON object mapping each word to its level.",
+        "annot_concreteness_prompt": "Rate the concreteness of each word from 1 (fully abstract) to 5 (fully concrete, picturable object or action). Words: {words}\nRespond ONLY with a JSON object mapping each word to an integer 1-5.",
         "suitability_prompt": "Assess the {media_type} '{title}' as material for a vocabulary-limited guessing riddle aimed at adult foreign-language learners. Respond ONLY with a JSON object, no markdown fences, with keys: popularity (1-5, how widely known globally), content_ok (true/false, false if sexual/graphic-violence/otherwise inappropriate for a general learning app), content_note (short string), retellability (1-5, how well the plot can be conveyed in very simple concrete words), retell_note (short string), verdict (one of: good, ok, poor).",
     },
 }
@@ -28,6 +32,7 @@ def _load(path, default):
     return default
 
 def _save(path, obj):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = path + ".tmp"
     with open(tmp, "w") as f: json.dump(obj, f, indent=1)
     os.replace(tmp, path)
@@ -62,22 +67,14 @@ def lesson_sort_key(k):
     return (int(m.group(1)) if m else 0, m.group(2) if m else str(k))
 
 def wordlist_lessons(name):
-    data = json.load(open(f"wordlists/{name}.json"))
-    if "lessons" in data: return sorted(data["lessons"].keys(), key=lesson_sort_key)
+    data = load_wordlist(name)
+    if isinstance(data, dict) and "lessons" in data: return sorted(data["lessons"].keys(), key=lesson_sort_key)
     return []
 
 def build_vocab(name, upto, extra, lemma_variants):
     vocab = set()
     for w in pipeline.seed_en(): vocab |= lemma_variants(w)
-    if name:
-        data = json.load(open(f"wordlists/{name}.json"))
-        if "lessons" in data:
-            keys = sorted(data["lessons"].keys(), key=lesson_sort_key)
-            if upto in keys: keys = keys[:keys.index(upto) + 1]
-            words = [v for k in keys for g in data["lessons"][k] for v in g]
-        else:
-            words = data if isinstance(data, list) else data.get("words", [])
-    else: words = []
+    words = wordlist_words(name, upto) if name else []
     for w in list(words) + list(extra or []):
         for tok in pipeline.tokenize(str(w)): vocab |= lemma_variants(tok)
     return vocab
@@ -92,7 +89,25 @@ def strip_json(s):
     return m.group(0) if m else s
 
 def llm(temp, cfg):
-    return pipeline.make_rate_limited(pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), temp, max_tokens=cfg.get("max_tokens")), float(cfg.get("min_interval", 1.0)))
+    lp = {**DEFAULT_SETTINGS["llm_params"], **(cfg.get("llm_params") or {})}
+    params = {k: (float(lp[k]) if k in ("top_p", "frequency_penalty", "presence_penalty") else (int(lp[k]) if k == "seed" else ([s.strip() for s in str(lp[k]).split(",") if s.strip()] if k == "stop" else lp[k]))) for k in ("top_p", "frequency_penalty", "presence_penalty", "seed", "stop") if str(lp.get(k, "")).strip() != ""}
+    return pipeline.make_rate_limited(pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), temp, max_retries=int(lp.get("max_retries", 3)), max_tokens=cfg.get("max_tokens"), params=params), float(cfg.get("min_interval", 1.0)))
+
+def list_dir(): return os.path.join(DIR, "_lists")
+
+def wordlist_path(name):
+    up = os.path.join(list_dir(), name + ".json")
+    return up if os.path.exists(up) else f"wordlists/{name}.json"
+
+def load_wordlist(name): return json.load(open(wordlist_path(name)))
+
+def wordlist_words(name, upto=None):
+    data = load_wordlist(name)
+    if isinstance(data, dict) and "lessons" in data:
+        keys = sorted(data["lessons"].keys(), key=lesson_sort_key)
+        if upto in keys: keys = keys[:keys.index(upto) + 1]
+        return [v for k in keys for g in data["lessons"][k] for v in g]
+    return data if isinstance(data, list) else data.get("words", [])
 
 def cfg_of(r):
     s = settings()
@@ -166,6 +181,100 @@ def step_recall(r):
 
 STEPS = {"assess": step_assess, "forbidden": step_forbidden, "generate": step_generate, "validate": step_validate, "recall": step_recall}
 
+def parse_source(content, loader, column=None):
+    content = content.strip()
+    if loader == "auto":
+        try:
+            d = json.loads(content)
+            return d if (isinstance(d, dict) and "lessons" in d) else [str(w) for w in (d if isinstance(d, list) else d.get("words", []))]
+        except Exception:
+            loader = "csv" if ("," in content.splitlines()[0] or ";" in content.splitlines()[0]) and len(content.splitlines()) > 1 else "plain"
+    if loader == "ltwf": return json.loads(content)
+    if loader == "plain": return parse_words(content)
+    if loader == "csv":
+        import csv, io
+        sniff = csv.Sniffer()
+        try: dialect = sniff.sniff(content[:2000])
+        except Exception: dialect = csv.excel
+        rows = list(csv.reader(io.StringIO(content), dialect))
+        header = rows[0]
+        idx = 0
+        if column not in (None, ""):
+            if str(column).isdigit(): idx = int(column)
+            elif column in header: idx = header.index(column)
+        has_header = column in header if column else not all(c.replace("-", "").isalpha() and c.islower() for c in [r[idx] for r in rows[:5] if len(r) > idx])
+        vals = [r[idx].strip() for r in (rows[1:] if has_header else rows) if len(r) > idx and r[idx].strip()]
+        return sorted({v.lower() for v in vals if re.fullmatch(r"[a-zA-Z][a-zA-Z' -]*", v)})
+    raise ValueError("unknown loader")
+
+def annot_path(name): return os.path.join(DIR, "_annot", re.sub(r"\W+", "_", name) + ".json")
+def load_annot(name): return _load(annot_path(name), {})
+ANNOT_JOBS = {}
+
+def canonical_words(name):
+    lv, can = pipeline.lang_fns("en")
+    out = []
+    for w in wordlist_words(name):
+        for tok in pipeline.tokenize(str(w)):
+            c = can(tok)
+            if c and c not in out: out.append(c)
+    return sorted(set(out))
+
+def run_annotators(name, annotators, model, cfg):
+    words = canonical_words(name)
+    ann = load_annot(name)
+    job = ANNOT_JOBS[name] = {"done": 0, "total": len(words) * len(annotators), "error": ""}
+    errs = []
+    if "pos" in annotators:
+        try:
+            import nltk
+            try: nltk.pos_tag(["test"])
+            except LookupError: nltk.download("averaged_perceptron_tagger_eng", quiet=True); nltk.download("averaged_perceptron_tagger", quiet=True)
+            for w, tag in nltk.pos_tag(words): ann.setdefault(w, {})["pos"] = tag
+            _save(annot_path(name), ann)
+        except Exception as e: errs.append(f"pos: {e}")
+        job["done"] += len(words)
+    pk = {"topic": "annot_topic_prompt", "level": "annot_level_prompt", "concreteness": "annot_concreteness_prompt"}
+    svc = llm(0.2, cfg)
+    for a in annotators:
+        if a not in pk: continue
+        try:
+            todo = [w for w in words if a not in ann.get(w, {})]
+            for i in range(0, len(todo), 40):
+                batch = todo[i:i + 40]
+                raw = svc(cfg["prompts"][pk[a]].format(words=", ".join(batch)), model)
+                try: m = json.loads(strip_json(raw))
+                except Exception: m = {}
+                for w in batch:
+                    v = m.get(w, m.get(w.capitalize()))
+                    if v is not None: ann.setdefault(w, {})[a] = v
+                job["done"] += len(batch)
+                _save(annot_path(name), ann)
+            job["done"] += len(words) - len(todo)
+        except Exception as e: errs.append(f"{a}: {str(e)[:200]}"); job["done"] = job["total"]
+    _save(annot_path(name), ann)
+    if errs: job["error"] = "; ".join(errs); threading.Timer(20, lambda: ANNOT_JOBS.pop(name, None)).start()
+    else: ANNOT_JOBS.pop(name, None)
+
+def apply_filters(rows, filters):
+    def ok(r):
+        for f in filters or []:
+            v = r["annot"].get(f["col"]) if f["col"] != "word" else r["word"]
+            s, fv = str(v).lower() if v is not None else "", str(f.get("val", "")).lower()
+            op = f.get("op", "contains")
+            if op == "contains" and fv not in s: return False
+            if op == "eq" and s != fv: return False
+            if op == "ne" and s == fv: return False
+            if op in ("lte", "gte"):
+                try:
+                    if op == "lte" and float(v) > float(fv): return False
+                    if op == "gte" and float(v) < float(fv): return False
+                except Exception: return False
+            if op == "set" and v is None: return False
+            if op == "unset" and v is not None: return False
+        return True
+    return [r for r in rows if ok(r)]
+
 def run_steps(rid, steps):
     r = load_riddle(rid)
     if not r: BUSY.pop(rid, None); return
@@ -187,6 +296,98 @@ def register(app, exp_dir):
 
     @app.route("/api/riddle_keys", methods=["GET"])
     def get_keys(): return jsonify(key_status())
+
+    @app.route("/api/provider_test/<prov>", methods=["POST"])
+    def provider_test(prov):
+        if prov not in pipeline.PROVIDERS: return jsonify({"error": "unknown provider"}), 404
+        model = (request.get_json(force=True) or {}).get("model") or {"openrouter": "openai/gpt-4o-mini", "groq": "groq::llama-3.1-8b-instant", "gemini": "gemini::gemini-2.0-flash", "mistral": "mistral::mistral-small-latest", "cerebras": "cerebras::llama3.1-8b", "dashscope": "dashscope::qwen-turbo", "deepseek": "deepseek::deepseek-chat"}.get(prov, "openai/gpt-4o-mini")
+        t0 = time.time()
+        try:
+            out = pipeline.openrouter_raw(os.environ.get("OPENROUTER_API_KEY", ""), 0.0, max_retries=0, max_tokens=8)("Reply with the single word: ok", model)
+            return jsonify({"ok": True, "seconds": round(time.time() - t0, 2), "reply": out[:40], "model": model})
+        except Exception as e:
+            return jsonify({"ok": False, "seconds": round(time.time() - t0, 2), "error": str(e)[:300], "model": model})
+
+    @app.route("/api/lex/sources", methods=["GET"])
+    def lex_sources():
+        out = []
+        seen = set()
+        for path in sorted(glob.glob(os.path.join(list_dir(), "*.json"))):
+            n = os.path.basename(path).rsplit(".", 1)[0]; seen.add(n)
+            out.append({"name": n, "origin": "uploaded", "words": len(canonical_words(n)), "lessons": len(wordlist_lessons(n)), "annotated": len(load_annot(n)), "busy": ANNOT_JOBS.get(n)})
+        for path in sorted(glob.glob("wordlists/*.json")):
+            n = os.path.basename(path).rsplit(".", 1)[0]
+            if n in seen: continue
+            out.append({"name": n, "origin": "built-in", "words": len(canonical_words(n)), "lessons": len(wordlist_lessons(n)), "annotated": len(load_annot(n)), "busy": ANNOT_JOBS.get(n)})
+        return jsonify(out)
+
+    @app.route("/api/lex/sources", methods=["POST"])
+    def lex_upload():
+        body = request.get_json(force=True)
+        name = re.sub(r"\W+", "_", body.get("name", "")).strip("_")
+        if not name: return jsonify({"error": "no name"}), 400
+        try: data = parse_source(body.get("content", ""), body.get("loader", "auto"), body.get("column"))
+        except Exception as e: return jsonify({"error": f"loader failed: {e}"}), 400
+        n = len(data.get("lessons", {})) if isinstance(data, dict) else len(data)
+        if not n: return jsonify({"error": "loader produced nothing"}), 400
+        if body.get("preview"): return jsonify({"name": name, "preview": (data if isinstance(data, list) else sorted(data["lessons"].keys(), key=lesson_sort_key))[:60], "count": n})
+        os.makedirs(list_dir(), exist_ok=True)
+        _save(os.path.join(list_dir(), name + ".json"), data)
+        return jsonify({"name": name, "count": n})
+
+    @app.route("/api/lex/sources/<name>/delete", methods=["POST"])
+    def lex_delete(name):
+        p = os.path.join(list_dir(), name + ".json")
+        if os.path.exists(p): os.remove(p)
+        if os.path.exists(annot_path(name)): os.remove(annot_path(name))
+        return jsonify({"deleted": name})
+
+    @app.route("/api/lex/table/<name>")
+    def lex_table(name):
+        ann = load_annot(name)
+        words = canonical_words(name)
+        cols = sorted({c for a in ann.values() for c in a})
+        rows = [{"word": w, "annot": ann.get(w, {})} for w in words]
+        return jsonify({"cols": cols, "rows": rows, "busy": ANNOT_JOBS.get(name)})
+
+    @app.route("/api/lex/annotate", methods=["POST"])
+    def lex_annotate():
+        body = request.get_json(force=True)
+        name, annotators = body.get("list"), [a for a in body.get("annotators", []) if a in ("topic", "level", "concreteness", "pos")]
+        if not name or not annotators: return jsonify({"error": "need list and annotators"}), 400
+        if ANNOT_JOBS.get(name): return jsonify({"error": "busy"}), 409
+        s = settings()
+        model = body.get("model") or s["gen_model"]
+        ANNOT_JOBS[name] = {"done": 0, "total": 1, "error": ""}
+        threading.Thread(target=run_annotators, args=(name, annotators, model, s), daemon=True).start()
+        return jsonify({"started": annotators})
+
+    @app.route("/api/lex/annot/<name>", methods=["POST"])
+    def lex_annot_edit(name):
+        body = request.get_json(force=True)
+        ann = load_annot(name)
+        for w, kv in body.get("set", {}).items():
+            for c, v in kv.items():
+                if v in ("", None): ann.get(w, {}).pop(c, None)
+                else: ann.setdefault(w, {})[c] = v
+        _save(annot_path(name), ann)
+        return jsonify({"ok": True})
+
+    @app.route("/api/lex/export", methods=["POST"])
+    def lex_export():
+        body = request.get_json(force=True)
+        src, name = body.get("list"), re.sub(r"\W+", "_", body.get("name", "")).strip("_")
+        if not src or not name: return jsonify({"error": "need list and name"}), 400
+        ann = load_annot(src)
+        rows = apply_filters([{"word": w, "annot": ann.get(w, {})} for w in canonical_words(src)], body.get("filters"))
+        words = [r["word"] for r in rows]
+        if not words: return jsonify({"error": "empty result"}), 400
+        os.makedirs(list_dir(), exist_ok=True)
+        _save(os.path.join(list_dir(), name + ".json"), words)
+        for w in words:
+            if ann.get(w): pass
+        _save(annot_path(name), {w: ann[w] for w in words if w in ann})
+        return jsonify({"name": name, "count": len(words)})
 
     @app.route("/api/riddle_keys", methods=["POST"])
     def set_keys():
@@ -214,7 +415,7 @@ def register(app, exp_dir):
     @app.route("/api/riddle_wordlists")
     def rwordlists():
         out = {}
-        for path in glob.glob("wordlists/*.json"):
+        for path in glob.glob("wordlists/*.json") + glob.glob(os.path.join(list_dir(), "*.json")):
             name = os.path.basename(path).rsplit(".", 1)[0]
             try: out[name] = wordlist_lessons(name)
             except Exception: out[name] = []
@@ -225,10 +426,10 @@ def register(app, exp_dir):
         body = request.get_json(force=True)
         name = re.sub(r"\W+", "_", body.get("name", "")).strip("_")
         if not name: return jsonify({"error": "no name"}), 400
-        content = body.get("content", "")
-        try: data = json.loads(content)
-        except Exception: data = parse_words(content)
-        _save(f"wordlists/{name}.json", data)
+        try: data = parse_source(body.get("content", ""), "auto")
+        except Exception as e: return jsonify({"error": str(e)}), 400
+        os.makedirs(list_dir(), exist_ok=True)
+        _save(os.path.join(list_dir(), name + ".json"), data)
         return jsonify({"name": name})
 
     @app.route("/api/riddles", methods=["GET"])
